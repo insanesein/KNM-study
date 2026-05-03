@@ -1,4 +1,3 @@
-
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -122,10 +121,11 @@
 
 /* ── MOBILE RESPONSIVE ───────────────────────────────────────────────────── */
 @media (max-width: 600px) {
-  .header-box { padding: 0.85rem 1rem; gap: 8px; }
-  .header-left h2 { font-size: 16px; }
+  .wrap { padding: 0.5rem 10px; padding-top: calc(60px + 0.5rem); }
+  .header-box { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #ffffff; padding: 8px 12px; gap: 8px; border-bottom: 1px solid #e8e8e8; margin-bottom: 0; }
+  .header-left h2 { font-size: 15px; }
   .header-left p { font-size: 12px; }
-  .hdr-btn { font-size: 13px; padding: 8px 12px; }
+  .hdr-btn { font-size: 12px; padding: 6px 10px; }
   .topic-btn { font-size: 12px; padding: 6px 10px; }
   .word-title { font-size: 15px; }
   .word-body { font-size: 14px; padding-left: 10px; }
@@ -136,10 +136,12 @@
   #searchInput { font-size: 16px; } /* prevent iOS zoom */
   .en-line { font-size: 12px; }
   .speak-btn { font-size: 17px; }
+  .exam-wrap { padding: 0 10px; padding-top: calc(70px + 0.5rem); }
+  .exam-top { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #ffffff; border-radius: 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 0; padding: 8px 12px; }
 }
 @media (max-width: 380px) {
   .btn-row { gap: 5px; }
-  .hdr-btn { font-size: 12px; padding: 7px 10px; }
+  .hdr-btn { font-size: 11px; padding: 6px 8px; }
 }
 </style>
 
@@ -951,53 +953,77 @@ var examTimerInterval = null;
 var examSecondsLeft = 45 * 60; // 45 minutes
 
 // ─── EXAM FUNCTIONS ───────────────────────────────────────────────────────────
+function clearWrongQs() {
+  localStorage.removeItem('knm_wrong_qs');
+  // Re-render result to update the message
+  var el = document.querySelector('.result-box div[style*="margin-top:12px"]');
+  if (el) el.remove();
+}
+
 function startExam() {
   var totalSlots = 40;
   var maxBlanks = Math.floor(totalSlots * 0.09); // <10% → max 3 blank questions
 
-  // Separate regular and blank questions
+  // Load previously wrong questions
+  var wrongQs = [];
+  try { wrongQs = JSON.parse(localStorage.getItem('knm_wrong_qs') || '[]'); } catch(e) {}
+
+  // Separate pools
   var regularPool = allQuestions.slice();
   var blankPool = typeof blankQuestions !== 'undefined' ? blankQuestions.slice() : [];
 
-  // Pick blank questions first (capped at maxBlanks), shuffled
+  // Pick blank questions (capped at maxBlanks)
   var pickedBlanks = shuffle(blankPool).slice(0, maxBlanks);
 
-  // Group regular questions by theme
+  // Reserve slots for wrong questions (up to half of totalSlots)
+  var wrongSlots = Math.min(wrongQs.length, Math.floor(totalSlots / 2));
+  var guaranteedWrong = shuffle(wrongQs).slice(0, wrongSlots);
+
+  // Build set of question texts already included
+  var usedTexts = {};
+  pickedBlanks.forEach(function(q) { usedTexts[q.q] = true; });
+  guaranteedWrong.forEach(function(q) { usedTexts[q.q] = true; });
+
+  // Fill remaining slots with regular questions (not already included)
+  var regularSlots = totalSlots - pickedBlanks.length - guaranteedWrong.length;
+  var filteredRegular = regularPool.filter(function(q) { return !usedTexts[q.q]; });
+
   var byTheme = {};
-  regularPool.forEach(function(q) {
+  filteredRegular.forEach(function(q) {
     if (!byTheme[q.theme]) byTheme[q.theme] = [];
     byTheme[q.theme].push(q);
   });
 
-  // Distribute remaining slots across themes evenly
-  var regularSlots = totalSlots - pickedBlanks.length;
   var themes = shuffle(Object.keys(byTheme));
   var base = Math.floor(regularSlots / themes.length);
   var remainder = regularSlots % themes.length;
-
   var pickedRegular = [];
   themes.forEach(function(theme, idx) {
     var slots = base + (idx < remainder ? 1 : 0);
     pickedRegular = pickedRegular.concat(shuffle(byTheme[theme]).slice(0, slots));
   });
 
-  // Insert blanks at random positions among regular questions
+  // Combine all: wrong questions first, then regular (grouped by theme), blanks scattered
+  var combined = guaranteedWrong.concat(pickedRegular);
   pickedBlanks.forEach(function(bq) {
-    var pos = Math.floor(Math.random() * (pickedRegular.length + 1));
-    pickedRegular.splice(pos, 0, bq);
+    var pos = Math.floor(Math.random() * (combined.length + 1));
+    combined.splice(pos, 0, bq);
   });
 
-  // Re-group by theme so same-theme questions stay together, blanks stay where inserted
-  var reGrouped = [];
-  var themeOrder = [];
+  // Re-group by theme so same-theme questions stay together
   var seen = {};
-  pickedRegular.forEach(function(q) {
+  var themeOrder = [];
+  combined.forEach(function(q) {
     if (!seen[q.theme]) { themeOrder.push(q.theme); seen[q.theme] = []; }
     seen[q.theme].push(q);
   });
-  themeOrder.forEach(function(theme) { reGrouped = reGrouped.concat(seen[theme]); });
+  examQuestions = [];
+  themeOrder.forEach(function(theme) { examQuestions = examQuestions.concat(seen[theme]); });
 
-  examQuestions = reGrouped;
+  // If we have wrong questions, mark them so they can be highlighted
+  examQuestions._wrongTexts = {};
+  guaranteedWrong.forEach(function(q) { examQuestions._wrongTexts[q.q] = true; });
+
   examAnswers = new Array(examQuestions.length).fill(-1);
   examSubmitted = false;
   document.getElementById('mainWrap').style.display = 'none';
@@ -1044,14 +1070,86 @@ function backToGuide() {
 
 function selectAnswer(qIdx, optIdx) {
   if (examSubmitted) return;
+  // If already answered, don't allow change
+  if (examAnswers[qIdx] !== -1) return;
+
   examAnswers[qIdx] = optIdx;
+  var correctIdx = examQuestions[qIdx].a;
+  var isCorrect = optIdx === correctIdx;
+
+  // If answered correctly, remove from wrong queue
+  if (isCorrect) {
+    try {
+      var wrongQs = JSON.parse(localStorage.getItem('knm_wrong_qs') || '[]');
+      var qText = examQuestions[qIdx].q;
+      wrongQs = wrongQs.filter(function(q) { return q.q !== qText; });
+      localStorage.setItem('knm_wrong_qs', JSON.stringify(wrongQs));
+    } catch(e) {}
+  }
+
+  // Show immediate feedback on all options for this question
   document.querySelectorAll('.opt-btn[data-q="' + qIdx + '"]').forEach(function(btn) {
-    btn.className = 'opt-btn' + (parseInt(btn.getAttribute('data-o')) === optIdx ? ' selected' : '');
+    var o = parseInt(btn.getAttribute('data-o'));
+    btn.disabled = true;
+    if (o === correctIdx) {
+      btn.className = 'opt-btn correct';
+    } else if (o === optIdx && !isCorrect) {
+      btn.className = 'opt-btn wrong';
+    } else {
+      btn.className = 'opt-btn';
+      btn.style.opacity = '0.5';
+    }
+    // Add UK flag toggle for translation — inside the button
+    var optText = examQuestions[qIdx].opts[o];
+    var optEn = (typeof optionTranslations !== 'undefined') ? (optionTranslations[optText] || '') : '';
+    if (optEn) {
+      var uid = 'optr-' + qIdx + '-' + o;
+      var wrap = document.createElement('span');
+      wrap.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:8px;';
+      var flag = document.createElement('button');
+      flag.className = 'translate-btn';
+      flag.title = 'Show translation';
+      flag.textContent = '🇬🇧';
+      flag.style.cssText = 'font-size:13px;vertical-align:middle;';
+      var enSpan = document.createElement('span');
+      enSpan.id = uid;
+      enSpan.style.cssText = 'font-size:12px;color:inherit;font-style:italic;display:none;opacity:0.8;';
+      enSpan.textContent = optEn;
+      flag.onclick = function(e) {
+        e.stopPropagation();
+        var visible = enSpan.style.display !== 'none';
+        enSpan.style.display = visible ? 'none' : 'inline';
+        flag.classList.toggle('active', !visible);
+      };
+      wrap.appendChild(flag);
+      wrap.appendChild(enSpan);
+      btn.appendChild(wrap);
+    }
   });
+
+  // Show ✓ / ✗ badge and English translation on the question card
+  var card = document.querySelector('.q-card[data-qi="' + qIdx + '"]');
+  if (card) {
+    var badge = card.querySelector('.q-feedback');
+    if (badge) {
+      badge.innerHTML = isCorrect
+        ? '<span style="color:#3B6D11;">✓ Correct</span>'
+        : '<span style="color:#A32D2D;">✗ Wrong</span>';
+    }
+    var enEl = card.querySelector('.q-en-translation');
+    if (enEl) {
+      var qText = examQuestions[qIdx].q;
+      var qEn = (typeof questionTranslations !== 'undefined' && questionTranslations[qText])
+             || (typeof blankQuestionTranslations !== 'undefined' && blankQuestionTranslations[qText])
+             || '';
+      if (qEn) { enEl.textContent = '🇬🇧 ' + qEn; enEl.style.display = 'block'; }
+    }
+  }
+
   var answered = examAnswers.filter(function(a) { return a !== -1; }).length;
   var total = examQuestions.length;
   var sb = document.getElementById('submitBtn');
-  if (sb) sb.textContent = 'Controleer antwoorden (' + answered + '/' + total + ')';
+  if (sb) sb.textContent = 'See results (' + answered + '/' + total + ')';
   var bar = document.getElementById('progressBar');
   if (bar) bar.style.width = Math.round(answered / total * 100) + '%';
 }
@@ -1060,15 +1158,38 @@ function submitExam() {
   examSubmitted = true;
   stopTimer();
   var score = 0;
-  examQuestions.forEach(function(q, i) { if (examAnswers[i] === q.a) score++; });
-  var pass = score >= 26;
+  var wrongQs = [];
+  examQuestions.forEach(function(q, i) {
+    if (examAnswers[i] === q.a) {
+      score++;
+    } else {
+      wrongQs.push(q);
+    }
+  });
+
+  // Save wrong questions for next exam (deduplicated by question text)
+  var existing = [];
+  try { existing = JSON.parse(localStorage.getItem('knm_wrong_qs') || '[]'); } catch(e) {}
+  var existingTexts = existing.map(function(q){ return q.q; });
+  wrongQs.forEach(function(q) {
+    if (!existingTexts.includes(q.q)) { existing.push(q); existingTexts.push(q.q); }
+  });
+  localStorage.setItem('knm_wrong_qs', JSON.stringify(existing));
+
+  var wrongCount = 0;
+  try { wrongCount = JSON.parse(localStorage.getItem('knm_wrong_qs') || '[]').length; } catch(e) {}
+
   var examDiv = document.getElementById('examInner');
   var resultHtml = '<div class="result-box">';
-  resultHtml += '<div class="result-score">' + score + '/40</div>';
+  resultHtml += '<div class="result-score">' + score + '/' + examQuestions.length + '</div>';
   resultHtml += '<div class="result-label">Minimaal 26 goed nodig om te slagen</div>';
   resultHtml += '<div class="result-badge ' + (pass ? 'pass' : 'fail') + '">' + (pass ? '✓ Geslaagd' : '✗ Niet geslaagd') + '</div><br>';
   resultHtml += '<button class="restart-btn" onclick="startExam()">↺ Opnieuw</button>';
   resultHtml += '<button class="restart-btn" onclick="backToGuide()">← Terug</button>';
+  if (wrongCount > 0) {
+    resultHtml += '<div style="margin-top:12px;font-size:13px;color:#6b6b6b;">📌 <strong>' + wrongCount + '</strong> wrong question' + (wrongCount > 1 ? 's' : '') + ' saved — they will appear in your next exam.';
+    resultHtml += ' <button onclick="clearWrongQs()" style="background:none;border:none;color:#c53030;cursor:pointer;font-size:12px;font-family:Nunito,sans-serif;text-decoration:underline;">Clear</button></div>';
+  }
   resultHtml += '</div>';
   examQuestions.forEach(function(q, i) {
     var userAns = examAnswers[i], correct_ans = q.a, isCorrect = userAns === correct_ans;
@@ -1099,17 +1220,51 @@ function renderExam() {
 
   var lastTheme = null;
   examQuestions.forEach(function(q, i) {
-    // Insert a theme divider whenever the category changes
     if (q.theme !== lastTheme) {
       html += '<div class="exam-theme-header">' + q.theme + '</div>';
       lastTheme = q.theme;
     }
-    html += '<div class="q-card"><div class="q-num">Vraag ' + (i + 1) + ' van ' + examQuestions.length + '</div>';
+    var answered = examAnswers[i] !== -1;
+    var isRetry = examQuestions._wrongTexts && examQuestions._wrongTexts[q.q];
+    html += '<div class="q-card" data-qi="' + i + '">';
+    html += '<div class="q-num" style="display:flex;justify-content:space-between;align-items:center;">';
+    html += '<span>Vraag ' + (i + 1) + ' van ' + examQuestions.length + (isRetry ? ' <span style="font-size:11px;background:#fff8e6;color:#7a5c00;padding:1px 7px;border-radius:10px;font-weight:600;">📌 Retry</span>' : '') + '</span>';
+    html += '<span class="q-feedback" style="font-weight:600;font-size:13px;">';
+    if (answered) {
+      var correct = examAnswers[i] === q.a;
+      html += correct ? '<span style="color:#3B6D11;">✓ Correct</span>' : '<span style="color:#A32D2D;">✗ Wrong</span>';
+    }
+    html += '</span></div>';
     html += '<div class="q-text">' + q.q + '</div>';
+    html += '<div class="q-en-translation" style="display:' + (answered ? 'block' : 'none') + ';font-size:13px;color:#6b6b6b;font-style:italic;margin:-4px 0 10px;">';
+    if (answered) {
+      var qEn = (typeof questionTranslations !== 'undefined' && questionTranslations[q.q])
+             || (typeof blankQuestionTranslations !== 'undefined' && blankQuestionTranslations[q.q])
+             || '';
+      if (qEn) html += '🇬🇧 ' + qEn;
+    }
+    html += '</div>';
     q.opts.forEach(function(opt, oi) {
-      var sel = examAnswers[i] === oi ? ' selected' : '';
-      html += '<button class="opt-btn' + sel + '" data-q="' + i + '" data-o="' + oi + '" onclick="selectAnswer(' + i + ',' + oi + ')">';
-      html += String.fromCharCode(65 + oi) + '. ' + opt + '</button>';
+      var cls = 'opt-btn';
+      var extraStyle = '';
+      if (answered) {
+        if (oi === q.a) cls += ' correct';
+        else if (oi === examAnswers[i]) cls += ' wrong';
+        else extraStyle = 'opacity:0.5;';
+      } else if (examAnswers[i] === oi) {
+        cls += ' selected';
+      }
+      var optEn = answered ? ((typeof optionTranslations !== 'undefined') ? (optionTranslations[opt] || '') : '') : '';
+      html += '<button class="' + cls + '" style="' + extraStyle + '" data-q="' + i + '" data-o="' + oi + '" onclick="selectAnswer(' + i + ',' + oi + ')" ' + (answered ? 'disabled' : '') + '>';
+      html += String.fromCharCode(65 + oi) + '. ' + opt;
+      if (answered && optEn) {
+        var uid = 'optr-' + i + '-' + oi;
+        html += '<span style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;">';
+        html += '<button class="translate-btn" style="font-size:13px;" onclick="event.stopPropagation();(function(el,btn){var v=el.style.display!==\'none\';el.style.display=v?\'none\':\'inline\';btn.classList.toggle(\'active\',!v);})(document.getElementById(\'' + uid + '\'),this)" title="Show translation">🇬🇧</button>';
+        html += '<span id="' + uid + '" style="font-size:12px;font-style:italic;display:none;opacity:0.8;">' + optEn + '</span>';
+        html += '</span>';
+      }
+      html += '</button>';
     });
     html += '</div>';
   });
@@ -1180,7 +1335,7 @@ var verbData = [
   { name:"uitleggen", meaning:"to explain", type:"sep", ik:"leg uit", jij:"legt uit", hij:"legt uit", wij:"leggen uit", past:"legde uit", participle:"uitgelegd", ex:"De dokter <strong>legt</strong> de behandeling <strong>uit</strong>." },
   { name:"meenemen", meaning:"to take along / to bring", type:"sep", ik:"neem mee", jij:"neemt mee", hij:"neemt mee", wij:"nemen mee", past:"nam mee", participle:"meegenomen", ex:"Daan <strong>neemt</strong> koekjes <strong>mee</strong> naar school." },
   { name:"terugbetalen", meaning:"to pay back / to repay", type:"sep", ik:"betaal terug", jij:"betaalt terug", hij:"betaalt terug", wij:"betalen terug", past:"betaalde terug", participle:"terugbetaald", ex:"Je <strong>betaalt</strong> de hypotheek elke maand <strong>terug</strong>." },
-  { name:"invullen", meaning:"to fill in (a form)", type:"sep", ik:"vul in", jij:"vult in", hij:"vult in", wij:"vullen in", past:"vulde in", participle:"ingevuld", ex:"Je <strong>vult</strong> het formulier online <strong>in</strong>." },
+  { name:"betekenen", meaning:"to mean", type:"regular", ik:"beteken", jij:"betekent", hij:"betekent", wij:"betekenen", past:"betekende", participle:"betekend", ex:"Wat <strong>betekent</strong> dit woord in het Nederlands?" },
   { name:"afhalen", meaning:"to pick up (collect)", type:"sep", ik:"haal af", jij:"haalt af", hij:"haalt af", wij:"halen af", past:"haalde af", participle:"afgehaald", ex:"Daan <strong>haalt</strong> zijn medicijnen <strong>af</strong> bij de apotheek." },
 ];
 var verbFilter = 'all';
@@ -1360,6 +1515,1323 @@ renderNav();
 renderContent();
 updateSavedCount();
 
+// ─── OPTION TRANSLATIONS ────────────────────────────────────────────────────────
+var optionTranslations = {
+  '112': '112 (emergency number)',
+  'AOW': 'State pension (AOW)',
+  'AOW / SVB': 'State pension / Social Insurance Bank',
+  'AVG': 'GDPR (data protection law)',
+  'Afsluitdijk': 'Afsluitdijk (32km barrier dam)',
+  'Afvalinzameling': 'Waste collection',
+  'Afvalscheiding': 'Waste separation',
+  'Apotheek': 'Pharmacy',
+  'Arbeidscontract': 'Employment contract',
+  'BRP': 'Personal Records Database (BRP)',
+  'BSN': 'Citizen Service Number (BSN)',
+  'BSO': 'After-school care (BSO)',
+  'Basisschool / CITO': 'Primary school / CITO test',
+  'Belastingaangifte': 'Tax return',
+  'Betrokken ouders': 'Involved parents',
+  'Bijstand': 'Social assistance',
+  'Borg': 'Deposit (rental guarantee)',
+  'Brutoloon': 'Gross salary',
+  'CAO': 'Collective Labour Agreement (CLA)',
+  'DUO': 'DUO (Education Executive Agency)',
+  'Deeltijdwerk': 'Part-time work',
+  'Dekolonisatie': 'Decolonisation',
+  'Deltawerken': 'Delta Works',
+  'Democratie': 'Democracy',
+  'Den Haag': 'The Hague',
+  'Dienst Toeslagen': 'Benefits Service',
+  'DigiD': 'DigiD (digital government ID)',
+  'Directheid': 'Directness',
+  'Diversiteit': 'Diversity',
+  'Dodenherdenking': 'Remembrance Day (4 May)',
+  'Donorregister': 'Donor Register',
+  'Een bod doen': 'Making an offer',
+  'EU': 'European Union (EU)',
+  'Een vast tarief': 'A fixed energy rate',
+  'GGD': 'Municipal Health Service (GGD)',
+  'GGZ': 'Mental healthcare (GGZ)',
+  'Gastarbeiders': 'Guest workers',
+  'Gouden Eeuw': 'Golden Age (17th century)',
+  'HAP': 'Out-of-hours GP post (HAP)',
+  'Holocaust': 'The Holocaust',
+  'Huurcommissie': 'Rent Tribunal',
+  'Huurcontract': 'Rental contract',
+  'Huurtoeslag': 'Rent allowance',
+  'Huisarts': 'GP (general practitioner)',
+  'Hypotheek': 'Mortgage',
+  'IND': 'IND (Immigration and Naturalisation Service)',
+  'Inburgeringsexamen': 'Civic integration exam',
+  'Jaarrekening': 'Annual bill',
+  'Juridisch Loket': 'Legal Aid Desk',
+  'KvK': 'Chamber of Commerce (KvK)',
+  'Kiesrecht': 'Right to vote',
+  'Kinderopvang': 'Childcare',
+  'Koningsdag': 'King\'s Day',
+  'Leerplicht': 'Compulsory education',
+  'MBO': 'Secondary Vocational Education (MBO)',
+  'MAP': 'Civic Activation Programme (MAP)',
+  'Maatschappelijk werk': 'Social work',
+  'Makelaar': 'Estate agent',
+  'Machtenscheiding': 'Separation of powers',
+  'Medisch beroepsgeheim': 'Medical confidentiality',
+  'Medisch dossier': 'Medical record',
+  'MijnOverheid': 'MyGovernment portal',
+  'Minimumloon': 'Minimum wage',
+  'Motivatiebrief': 'Cover letter',
+  'NAVO': 'NATO',
+  'NT2': 'Dutch as a Second Language (NT2)',
+  'Nettoloon': 'Net salary',
+  'Notaris': 'Notary',
+  'Nutsvoorzieningen': 'Utilities (gas, water, electricity)',
+  'OZB': 'Property tax (OZB)',
+  'Ondernemingsraad': 'Works council (OR)',
+  'Orgaandonatie': 'Organ donation',
+  'Ouderlijk gezag': 'Parental authority',
+  'Ouderlijke aansprakelijkheid': 'Parental liability',
+  'Overlast': 'Nuisance',
+  'POH': 'GP practice nurse (POH)',
+  'Participatieverklaring': 'Participation declaration',
+  'Politie': 'Police',
+  'Polikliniek': 'Outpatient clinic',
+  'Polders': 'Polders',
+  'Provincie': 'Province',
+  'RDW': 'Vehicle Authority (RDW)',
+  'Rechten & plichten': 'Rights and duties',
+  'Rechtsstaat': 'Constitutional state',
+  'SVB': 'Social Insurance Bank (SVB)',
+  'SEH': 'A&E / Emergency department',
+  'Schoolverzuim': 'School absenteeism / truancy',
+  'Schuldhulpverlening': 'Debt assistance',
+  'Servicekosten': 'Service charges',
+  'Slavernij': 'Slavery',
+  'Solliciteren': 'Job application',
+  'Spreekuur': 'Surgery hours (GP)',
+  'Stage': 'Internship',
+  'Tandarts': 'Dentist',
+  'Tweede Kamer': 'House of Representatives',
+  'Tweede Wereldoorlog': 'Second World War',
+  'Tolk': 'Interpreter',
+  'Trakteren': 'Treating classmates',
+  'UWV': 'UWV (Employee Insurance Agency)',
+  'VVE': 'Homeowners\' association (VvE)',
+  'VOC': 'VOC (Dutch East India Company)',
+  'VN': 'United Nations (UN)',
+  'Vakantierooster': 'Holiday schedule',
+  'Veilig Thuis': 'Safe Home (domestic violence helpline)',
+  'Verblijfsvergunning': 'Residence permit',
+  'Verhuizen': 'Moving house',
+  'Verloskundige': 'Midwife',
+  'Verwijsbrief': 'GP referral letter',
+  'Vrijwilligerswerk': 'Voluntary work',
+  'WMO': 'Social Support Act (WMO)',
+  'WW-uitkering': 'Unemployment benefit',
+  'Watersnoodramp': 'Flood disaster (1953)',
+  'Waterschap': 'Water board',
+  'Willem van Oranje': 'William of Orange',
+  'Woningcorporatie': 'Housing association',
+  'ZZP\'er': 'Self-employed worker (ZZP)',
+  'Zelfbeschikking': 'Self-determination',
+  'Zorgverzekering': 'Health insurance',
+  'Zorgtoeslag': 'Healthcare allowance',
+  'een bod doen': 'Making an offer (on a house)',
+  'Bevrijdingsdag': 'Liberation Day (5 May)',
+  'Eigen risico': 'Deductible (health insurance)',
+  'Eerste Kamer': 'Senate (Eerste Kamer)',
+  'Energie besparen': 'Saving energy',
+  'Herhaalrecept': 'Repeat prescription',
+  'Loonstrook': 'Pay slip',
+  'Grondwet': 'Constitution',
+  'Kabinet': 'Cabinet (government)',
+  'Minister-president': 'Prime minister',
+  'Parlement': 'Parliament',
+  'Prinsjesdag': 'Budget Day (Prinsjesdag)',
+  'Coalitieakkoord': 'Coalition agreement',
+  'Inclusie': 'Inclusion',
+  'Online veiligheid': 'Online safety',
+  'Op tijd komen': 'Being on time',
+  'Poldermodel': 'Polder model (consensus politics)',
+  'Tolerantie': 'Tolerance',
+  'Godsdienstvrijheid': 'Freedom of religion',
+  'Gelijkheid': 'Equality',
+  'Huiselijk geweld': 'Domestic violence',
+  'Cyberpesten': 'Cyberbullying',
+  'Discriminatie': 'Discrimination',
+  'Vrijheid van meningsuiting': 'Freedom of expression',
+  'Gemeente': 'Municipality',
+  'VvE': 'Homeowners\' association',
+  'Ja': 'Yes',
+  'Nee': 'No',
+  'Ja, het is verplicht': 'Yes, it is mandatory',
+  'Nee, het is vrijwillig': 'No, it is voluntary',
+  'Amsterdam': 'Amsterdam',
+  'Rotterdam': 'Rotterdam',
+  'Utrecht': 'Utrecht',
+  'Nee, de huisarts valt niet onder het eigen risico': 'No, the GP is not subject to the deductible',
+  'Ja, altijd': 'Yes, always',
+  'Alleen de eerste keer': 'Only the first time',
+  'Vanaf 18 jaar': 'From age 18',
+  'Vanaf 21 jaar': 'From age 21',
+  'Vanaf 25 jaar': 'From age 25',
+  'Binnen 5 dagen': 'Within 5 days',
+  'Binnen 1 dag': 'Within 1 day',
+  'Binnen 30 dagen': 'Within 30 days',
+  'Binnen 1 jaar': 'Within 1 year',
+  'Binnen 3 jaar': 'Within 3 years',
+  'Binnen 5 jaar': 'Within 5 years',
+  '4 jaar': '4 years',
+  '5 jaar': '5 years',
+  '6 jaar': '6 years',
+  '12 jaar': '12 years',
+  '14 jaar': '14 years',
+  '16 jaar': '16 years',
+  '18 jaar': '18 years',
+  'Elke 4 jaar': 'Every 4 years',
+  'Elke 2 jaar': 'Every 2 years',
+  'Elke 6 jaar': 'Every 6 years',
+  '€385': '€385',
+  '€150': '€150',
+  '€500': '€500',
+  '150 leden': '150 members',
+  '75 leden': '75 members',
+  '100 leden': '100 members',
+  '30 april': '30 April',
+  '27 april': '27 April',
+  '5 mei': '5 May',
+  '5 december': '5 December',
+  '25 december': '25 December',
+  'Voor 1 mei': 'Before 1 May',
+  'Voor 1 januari': 'Before 1 January',
+  '1940 tot 1945': '1940 to 1945',
+  '1939 tot 1944': '1939 to 1944',
+  '1941 tot 1946': '1941 to 1946',
+  '1949': '1949',
+  '1975': '1975',
+  'Bijna 1.836 mensen': 'Nearly 1,836 people',
+  'Meer dan 10.000 mensen': 'More than 10,000 people',
+  'Ongeveer 500 mensen': 'About 500 people',
+  'Meer dan 100.000': 'More than 100,000',
+  'Meer dan 500.000': 'More than 500,000',
+  '10': '10',
+  '12': '12',
+  '15': '15',
+  'De huisarts': 'The GP',
+  'De specialist': 'The specialist',
+  'De apotheek': 'The pharmacy',
+  'De HAP — Huisartsenpost': 'The out-of-hours GP post',
+  'De SEH — Spoedeisende Hulp': 'The A&E department',
+  'De GGZ — Geestelijke Gezondheidszorg': 'Mental healthcare (GGZ)',
+  'De GGD — Gemeentelijke Gezondheidsdienst': 'The Municipal Health Service',
+  'De verloskundige': 'The midwife',
+  'De POH — Praktijkondersteunner Huisarts': 'The GP practice nurse',
+  'De tandarts': 'The dentist',
+  'De notaris': 'The notary',
+  'De makelaar': 'The estate agent',
+  'De politie': 'The police',
+  'De rechter': 'The judge',
+  'De burgemeester': 'The mayor',
+  'De minister-president': 'The prime minister',
+  'De leerplichtambtenaar': 'The truancy officer',
+  'De maatschappelijk werker': 'The social worker',
+  'De gemeente': 'The municipality',
+  'De Belastingdienst': 'The Tax Authority',
+  'De KvK — Kamer van Koophandel': 'The Chamber of Commerce',
+  'De SVB — Sociale Verzekeringsbank': 'The Social Insurance Bank',
+  'Het UWV': 'The UWV',
+  'Het Juridisch Loket': 'The Legal Aid Desk',
+  'De IND — Immigratie- en Naturalisatiedienst': 'The IND',
+  'De Huurcommissie': 'The Rent Tribunal',
+  'De vakbond': 'The trade union',
+  'De OR — Ondernemingsraad': 'The works council',
+  'De woningcorporatie': 'The housing association',
+  'De VvE — Vereniging van Eigenaren': 'The homeowners\' association',
+  'Bij het UWV': 'At the UWV',
+  'Bij de gemeente': 'At the municipality',
+  'Bij de KvK — Kamer van Koophandel': 'At the Chamber of Commerce',
+  'Een verwijsbrief van de huisarts': 'A GP referral letter',
+  'Een herhaalrecept': 'A repeat prescription',
+  'Een verblijfsvergunning': 'A residence permit',
+  'Een arbeidscontract': 'An employment contract',
+  'Een hypotheek': 'A mortgage',
+  'Een huurcontract': 'A rental contract',
+  'Een CV en een motivatiebrief': 'A CV and a cover letter',
+  'BSN — Burgerservicenummer': 'BSN (Citizen Service Number)',
+  'DigiD — Digitale Identiteit': 'DigiD (Digital Identity)',
+  'BRP — Basisregistratie Personen': 'Personal Records Database (BRP)',
+  'Kinderbijslag': 'Child benefit',
+  'Gas, water en elektriciteit': 'Gas, water and electricity',
+  'Bijstandsuitkering': 'Social assistance benefit',
+  'AOW — Algemene Ouderdomswet': 'State pension (AOW)',
+  'Actief solliciteren naar werk': 'Actively applying for jobs',
+  'Niets, ze mag gewoon wachten op een baan': 'Nothing, she can just wait for a new job',
+  'Het recht om te stemmen bij verkiezingen': 'The right to vote in elections',
+  'Het recht om jezelf kandidaat te stellen bij verkiezingen': 'The right to stand as a candidate',
+  'De Eerste Kamer controleert wetten die de Tweede Kamer heeft goedgekeurd': 'The Senate reviews laws approved by the House of Representatives',
+  'De Eerste Kamer maakt nieuwe wetten': 'The Senate makes new laws',
+  'De Eerste Kamer kiest de minister-president': 'The Senate elects the prime minister',
+  'Alleen de Tweede Kamer': 'Only the House of Representatives',
+  'De Eerste Kamer en de Tweede Kamer samen': 'The Senate and House of Representatives together',
+  'Hij leest de Troonrede voor met de plannen van de regering voor het nieuwe jaar': 'He reads the Speech from the Throne with the government\'s plans',
+  'De verdeling van macht over wetgeving, uitvoering en rechtspraak': 'The division of power over legislation, enforcement and justice',
+  'Iedereen, ook de overheid, moet zich aan de wet houden': 'Everyone, including the government, must abide by the law',
+  'De hoogste wet van Nederland die grondrechten beschermt': 'The highest law protecting fundamental rights',
+  'Het waterschap beheert het waterpeil, de dijken en de waterkwaliteit in een regio': 'The water board manages water levels, dykes and water quality',
+  'Vrij reizen, wonen en werken in alle EU-landen': 'Free travel, living and working in all EU countries',
+  'Om te werken in fabrieken': 'To work in factories',
+  'Om asiel aan te vragen': 'To apply for asylum',
+  'Hij leidde de opstand tegen Spanje in de 16e eeuw': 'He led the revolt against Spain in the 16th century',
+  'De systematische moord op zes miljoen Joodse mensen door de nazi\'s tijdens de Tweede Wereldoorlog': 'The systematic murder of six million Jewish people by the Nazis',
+  'Haat of discriminatie van Joodse mensen': 'Hatred or discrimination of Jewish people',
+  'De bevrijding van 1945': 'The liberation of 1945',
+  'De slachtoffers van oorlog en geweld': 'The victims of war and violence',
+  'Nee, gedwongen huwelijken zijn verboden': 'No, forced marriages are forbidden',
+  'Ja, als de familie het goedkeurt': 'Yes, if the family approves',
+  'Je beslist zelf over je eigen leven, lichaam en keuzes': 'You decide for yourself about your own life, body and choices',
+  'Dat je andere mensen accepteert, ook als ze anders zijn dan jij, maar de wet geldt altijd': 'That you accept others even if different, but the law always applies',
+  'Dat mensen verschillend zijn in afkomst, religie, cultuur of achtergrond': 'That people differ in origin, religion, culture or background',
+  'Dat iedereen meedoet en geaccepteerd wordt, ongeacht achtergrond': 'That everyone participates and is accepted regardless of background',
+  'Pesten via internet of sociale media': 'Bullying via the internet or social media',
+  'Je BSN, wachtwoord of bankgegevens': 'Your BSN, password or bank details',
+  'Discriminatie is verboden': 'Discrimination is forbidden',
+  'Ja, iedereen heeft vrijheid van meningsuiting': 'Yes, everyone has freedom of expression',
+  'Ze zeggen eerlijk wat ze denken': 'They say honestly what they think',
+  'Om in te loggen bij overheidswebsites': 'To log in to government websites',
+  'Om berichten van de overheid te lezen en je persoonlijke gegevens te bekijken': 'To read government messages and view your personal data',
+  'Onbetaald werk dat je vrijwillig doet voor de samenleving of een organisatie': 'Unpaid work you voluntarily do for society or an organisation',
+  'Het salaris na aftrek van belasting en premies': 'Salary after deduction of tax and contributions',
+  'Het salaris voor aftrek van belasting': 'Salary before deduction of tax',
+  'Werk waarbij je minder uren maakt dan fulltime': 'Work where you work fewer hours than full-time',
+  'De OR vertegenwoordigt de werknemers en praat mee over beslissingen in het bedrijf': 'The works council represents employees and participates in company decisions',
+  'Afspraken over salaris en arbeidsvoorwaarden in een sector': 'Agreements about salary and working conditions in a sector',
+  'Om praktijkervaring op te doen': 'To gain practical experience',
+  'Een tijdelijk contract met een einddatum': 'A temporary contract with an end date',
+  'Een vast contract': 'A permanent contract',
+  'Ouderen en mensen met een beperking die niet zelfstandig kunnen wonen': 'Elderly people and people with a disability who cannot live independently',
+  'Een document dat bewijst dat je in Nederland mag wonen': 'A document proving you are allowed to live in the Netherlands',
+  'Zorgen voor veiligheid en onderzoek doen naar misdrijven': 'Ensuring safety and investigating crimes',
+  'Om Nederland te beschermen tegen overstromingen': 'To protect the Netherlands from flooding',
+  'Het IJsselmeer van de Waddenzee': 'The IJsselmeer from the Wadden Sea',
+  'De eerste multinationale onderneming ter wereld': 'The first multinational company in the world',
+  'Goederen, tot slaaf gemaakten en koloniale producten': 'Goods, enslaved people and colonial products',
+  'Een programma dat nieuwe inwoners helpt mee te doen in de samenleving en op de arbeidsmarkt': 'A programme helping new residents participate in society and the labour market',
+  'Een verklaring die je tekent om te laten zien dat je de waarden van Nederland accepteert': 'A declaration you sign to show you accept Dutch values',
+  'Mensen van 67 jaar en ouder die in Nederland hebben gewoond of gewerkt': 'People aged 67 or older who have lived or worked in the Netherlands',
+  'De wet van de staat staat altijd boven religieuze regels en tradities': 'The law always takes precedence over religious rules and traditions',
+  'Hij begeleidt de onderhandelingen om een coalitie te vormen': 'He guides coalition formation negotiations',
+  'Een plan van de coalitiepartijen met de plannen van de regering voor de komende jaren': 'A plan with the coalition government\'s plans for coming years',
+  'Voor het kopen van een huis': 'For buying a house',
+  'Bij de notaris': 'At the notary',
+  'Omdat er veel partijen zijn en één partij nooit een meerderheid heeft': 'Because many parties exist and no single party ever has a majority',
+  'Het parlement, de ministeries en de Hoge Raad': 'Parliament, the ministries and the Supreme Court',
+  'De universiteiten en hogescholen': 'The universities and colleges',
+  'De belastingkantoren en gemeenteraden': 'The tax offices and municipal councils',
+  'Naar het hbo of de universiteit': 'To HBO or university',
+  'Naar het mbo niveau 1': 'To MBO level 1',
+  'Naar de universiteit': 'To university',
+  'Alleen het mbo': 'Only MBO',
+  'Alleen het vmbo': 'Only VMBO',
+  '0 tot 4 jaar': '0 to 4 years',
+  '4 tot 12 jaar': '4 to 12 years',
+  '12 tot 16 jaar': '12 to 16 years',
+  'Wetenschappelijk onderwijs': 'Academic (university) education',
+  'Hoger beroepsonderwijs — praktijkgericht': 'Higher professional education — practice-oriented',
+  'De basisschool (groep 8)': 'Primary school (group 8)',
+  'Een extra cursus': 'An extra course',
+  'Een vervolgopleiding': 'A follow-on degree',
+  'NT2 — Nederlands als Tweede Taal': 'NT2 — Dutch as a Second Language',
+  'FNV en CNV': 'FNV and CNV (trade unions)',
+  'Je totale salaris vóór aftrek van belasting en premies': 'Your total salary before tax and contributions',
+  'Het bedrag dat je werkelijk op je bankrekening ontvangt na alle aftrekposten': 'The amount you actually receive after all deductions',
+  'Een geldbedrag dat je betaalt als garantie aan de verhuurder voordat je intrekt': 'A sum you pay as a guarantee to the landlord before moving in',
+  'Kosten voor gas, water en onderhoud bovenop de huur': 'Costs for gas, water and maintenance on top of rent',
+  'Papier, plastic, glas, GFT en restafval apart': 'Paper, plastic, glass, organic and residual waste separately',
+  'Zorgtoeslag, huurtoeslag, kinderopvangtoeslag, kindgebonden budget': 'Healthcare, rent, childcare and child budget allowances',
+  'Schade die jij veroorzaakt bij een ander': 'Damage you cause to someone else',
+  'Een tarief dat kan veranderen afhankelijk van de energieprijs op de markt': 'A rate that changes depending on the market energy price',
+  'Een overzicht van hoeveel energie je het afgelopen jaar hebt gebruikt en betaald': 'An overview of energy used and paid in the past year',
+  'Op een vaste dag die de gemeente bepaalt': 'On a fixed day determined by the municipality',
+  'Een organisatie die sociale huurwoningen verhuurt': 'An organisation that rents out social housing',
+  'Hij helpt bij het kopen, verkopen of huren van een huis': 'He helps buy, sell or rent a house',
+  'Recht op minimumloon en vakantiedagen': 'Right to minimum wage and holiday leave',
+  'Nee, alleen vaste werknemers': 'No, only permanent employees',
+  'Alleen mensen boven 21 jaar': 'Only people above 21',
+  'Niets, de werkgever bepaalt het salaris': 'Nothing, the employer determines the salary',
+  'Het volledige minimumloon — werkgevers zijn wettelijk verplicht dit te betalen aan werknemers van 21+': 'The full minimum wage — legally required for employees aged 21+',
+  'WW, AOW, bijstand, kinderbijslag': 'Unemployment benefit, state pension, social assistance, child benefit',
+  'Via de Belastingdienst met DigiD': 'Via the Tax Authority with DigiD',
+  'Het aanvragen van een verblijfsvergunning': 'Applying for a residence permit',
+  'Het verkrijgen van de Nederlandse nationaliteit': 'Obtaining Dutch citizenship',
+  'Inschrijving in de BRP, bijstand, vergunningen en afvalinzameling': 'BRP registration, social assistance, permits and waste collection',
+  'AOW en kinderbijslag': 'State pension and child benefit',
+  'Tussen 1927 en 1932': 'Between 1927 and 1932',
+  'Tussen 1900 en 1910': 'Between 1900 and 1910',
+  'Tussen 1953 en 1960': 'Between 1953 and 1960',
+  'Hoe oud moet hij minimaal zijn om te mogen stemmen?': 'What is the minimum age to vote?',
+  'Voortgezet Middelbaar Basisonderwijs': 'Continued middle basic education',
+  'Voorbereidend Middelbaar Beroepsonderwijs': 'Pre-vocational secondary education (VMBO)',
+  'Niveau 2': 'Level 2',
+  'Niveau 1': 'Level 1',
+  'Niveau 4': 'Level 4',
+  '1 februari 1953': '1 February 1953',
+  '1 februari 1940': '1 February 1940',
+  '1 februari 1965': '1 February 1965',
+  'Een militair bondgenootschap voor gezamenlijke verdediging': 'A military alliance for collective defence',
+  'Een economische unie': 'An economic union',
+  'Een organisatie voor mensenrechten': 'An organisation for human rights',
+  'De systematische moord op zes miljoen Joodse mensen door de nazi\'s': 'The systematic murder of six million Jewish people by the Nazis',
+  'Een hongersnood in Nederland tijdens de Tweede Wereldoorlog': 'A famine in the Netherlands during WWII',
+  'Een religieuze traditie in Israel': 'A religious tradition in Israel',
+  'Een wereldmacht in handel en cultuur': 'A world power in trade and culture',
+  'Een arme koloniale staat': 'A poor colonial state',
+  'Een deel van het Spaanse Rijk': 'Part of the Spanish Empire',
+  'Van tevoren bellen of appen dat hij laat is': 'Call or message in advance to say he is late',
+  'Niets, 15 minuten is normaal': 'Nothing, 15 minutes late is normal',
+  'De familie bepaalt met wie je trouwt': 'The family decides who you marry',
+  'De gemeente moet toestemming geven': 'The municipality must give permission',
+  'Je kiest zelf welk geloof je hebt, of geen': 'You choose your own faith, or none',
+  'Beslissingen nemen via overleg en compromis': 'Making decisions through consultation and compromise',
+  'Een systeem van dijken en polders': 'A system of dykes and polders',
+  'Een politieke partij in Nederland': 'A political party in the Netherlands',
+  'Naturalisatie aanvragen bij de IND — Immigratie- en Naturalisatiedienst': 'Applying for naturalisation at the IND',
+  'Jouw persoonsgegevens en privacy in Europa': 'Your personal data and privacy in Europe',
+  'Voertuigen en rijbewijzen registreren in Nederland': 'Registering vehicles and driving licences in the Netherlands',
+  'Verblijfsvergunningen en naturalisatieverzoeken beoordelen': 'Assessing residence permit and naturalisation requests',
+  'Via MijnGemeente.nl met je bankpas': 'Via MijnGemeente.nl with your bank card',
+  'De wettelijke verantwoordelijkheid en het recht van ouders om voor hun kinderen te zorgen': 'The legal responsibility and right of parents to care for their children',
+  'Iemand die het ouderlijk gezag overneemt als ouders niet voor hun kind kunnen zorgen': 'Someone who takes over parental authority when parents cannot care for their child',
+  'Tot 18 jaar': 'Until age 18',
+  'Tot 16 jaar': 'Until age 16',
+  'Tot 12 jaar': 'Until age 12',
+  'Als het kind jonger dan 14 jaar is': 'If the child is younger than 14',
+  'Als het kind jonger dan 18 jaar is': 'If the child is younger than 18',
+  'Je organen geven na jouw dood aan iemand anders die ze nodig heeft': 'Giving your organs after death to someone who needs them',
+  'Alle volwassen inwoners zijn automatisch geregistreerd. Je kunt je eigen keuze aangeven.': 'All adult residents are automatically registered. You can indicate your choice.',
+  'In het Donorregister': 'In the Donor Register',
+  'In de BRP bij de gemeente': 'In the BRP at the municipality',
+  'Via DigiD.nl met je bankpas': 'Via DigiD.nl with your bank card',
+  'Belastingen die je betaalt aan de gemeente, zoals OZB en rioolheffing': 'Taxes paid to the municipality such as property and sewage tax',
+  'Het leren van de Nederlandse taal en kennis opdoen over de Nederlandse samenleving': 'Learning Dutch and gaining knowledge of Dutch society',
+  'Woningnet': 'Woningnet (housing registration website)',
+  'Kinderopvangtoeslag aanvragen bij de gemeente': 'Applying for childcare allowance at the municipality',
+  'De Belastingdienst via DigiD': 'The Tax Authority via DigiD',
+  'Geeft het kind extra huiswerk': 'Gives the child extra homework',
+  'Controleert of er een geldige reden is': 'Checks whether there is a valid reason',
+  'Stuurt het kind naar een andere school': 'Sends the child to another school',
+  'WW bij UWV': 'Unemployment benefit at UWV',
+  'Een hypotheek bij de bank': 'A mortgage at the bank',
+  'Na het havo': 'After HAVO',
+  'Na het mbo': 'After MBO',
+  'Na het vwo': 'After VWO',
+  'Cadeau geven': 'Giving a gift',
+  'Een stage': 'An internship',
+  'Een bijbaan': 'A side job',
+  'Gehoorzamen': 'Obeying',
+  'Toestemming geven': 'Giving consent',
+  'Een leraar op school': 'A teacher at school',
+  'Hij telt de stemmen na': 'He recounts the votes',
+  'Hij schrijft nieuwe wetten': 'He writes new laws',
+  'Je unieke persoonsnummer bij de overheid': 'Your unique personal number with the government',
+  'Om te loggen bij overheidswebsites': 'To log in to government websites',
+  'Alleen voor mensen met werk': 'Only for people with a job',
+};
+
+// ─── ADDITIONAL OPTION TRANSLATIONS ─────────────────────────────────────────
+optionTranslations['0 tot 12 jaar'] = '0 to 12 years';
+optionTranslations['0900-8844'] = '0900-8844 (non-emergency police)';
+optionTranslations['1 jaar'] = '1 year';
+optionTranslations['10 provincies'] = '10 provinces';
+optionTranslations['100'] = '100';
+optionTranslations['113'] = '113 (suicide prevention helpline)';
+optionTranslations['12 provincies'] = '12 provinces';
+optionTranslations['15 provincies'] = '15 provinces';
+optionTranslations['150'] = '150';
+optionTranslations['1939-1944'] = '1939–1944';
+optionTranslations['1940-1945'] = '1940–1945';
+optionTranslations['1941-1946'] = '1941–1946';
+optionTranslations['1989'] = '1989';
+optionTranslations['21 jaar'] = '21 years';
+optionTranslations['3 jaar'] = '3 years';
+optionTranslations['4 tot 12 jaar na school'] = '4 to 12 years, after school';
+optionTranslations['50 leden'] = '50 members';
+optionTranslations['6 januari'] = '6 January';
+optionTranslations['65 jaar'] = '65 years';
+optionTranslations['67 jaar'] = '67 years';
+optionTranslations['70 jaar'] = '70 years';
+optionTranslations['75'] = '75';
+optionTranslations['Aangesteld door de Tweede Kamer'] = 'Appointed by the House of Representatives';
+optionTranslations['Actief kiesrecht'] = 'Active right to vote';
+optionTranslations['Afval scheiden in papier, plastic, glas, GFT en restafval'] = 'Separate waste into paper, plastic, glass, organic and residual';
+optionTranslations['Alleen als de baas het goedvindt'] = 'Only if the boss approves';
+optionTranslations['Alleen als de huisarts het toestaat'] = 'Only if the GP permits it';
+optionTranslations['Alleen als de rechter het toestaat'] = 'Only if the court permits it';
+optionTranslations['Alleen als het in het openbaar is'] = 'Only if it is in public';
+optionTranslations['Alleen als je het zelf aanvraagt'] = 'Only if you request it yourself';
+optionTranslations['Alleen bij de tandarts'] = 'Only at the dentist';
+optionTranslations['Alleen de eerste keer per jaar'] = 'Only the first time per year';
+optionTranslations['Alleen de werkgever bepaalt de regels op het werk'] = 'Only the employer determines the rules at work';
+optionTranslations['Alleen je paspoort'] = 'Just your passport';
+optionTranslations['Alleen je vakantiegeld'] = 'Only your holiday pay';
+optionTranslations['Alleen meer salaris als ze lid is van een vakbond'] = 'Only more salary if she is a union member';
+optionTranslations['Alleen mensen die meer dan 40 jaar hebben gewerkt'] = 'Only people who have worked more than 40 years';
+optionTranslations['Alleen papier en de rest samen'] = 'Only paper separate, the rest together';
+optionTranslations['Alleen rijke mensen hebben rechten'] = 'Only rich people have rights';
+optionTranslations['Alleen verboden op het werk'] = 'Only forbidden in the workplace';
+optionTranslations['Alleen voor gepensioneerden van 65 jaar en ouder'] = 'Only for retirees aged 65 and older';
+optionTranslations['Alleen zijn paspoort en DigiD'] = 'Just his passport and DigiD';
+optionTranslations['Alles in één zak'] = 'Everything in one bag';
+optionTranslations['Alles in één zak blijven gooien'] = 'Keep throwing everything in one bag';
+optionTranslations['Als de huisarts dicht is'] = 'When the GP is closed';
+optionTranslations['Als het kind jonger dan 12 jaar is'] = 'If the child is younger than 12';
+optionTranslations['Als je de taal van de dokter niet goed spreekt en hulp nodig hebt bij de communicatie'] = 'If you do not speak the doctor\'s language and need help communicating';
+optionTranslations['Altijd, het is verplicht bij elke afspraak'] = 'Always, it is required at every appointment';
+optionTranslations['BSO — buitenschoolse opvang'] = 'After-school care (BSO)';
+optionTranslations['Belastingdienst.nl'] = 'Belastingdienst.nl (Tax Authority website)';
+optionTranslations['Belastingen die je betaalt aan de nationale overheid'] = 'Taxes paid to the national government';
+optionTranslations['Belastingen innen voor de gemeente'] = 'Collecting taxes for the municipality';
+optionTranslations['Belastingen voor het gebruik van de snelweg'] = 'Taxes for using the motorway';
+optionTranslations['Benoemd, niet direct gekozen door de inwoners'] = 'Appointed, not directly elected by residents';
+optionTranslations['Bescherming van de natuur'] = 'Protection of nature';
+optionTranslations['Betaald werk via UWV'] = 'Paid work via UWV';
+optionTranslations['Betaald werk via de gemeente'] = 'Paid work via the municipality';
+optionTranslations['Betaald werk voor mensen zonder baan'] = 'Paid work for people without a job';
+optionTranslations['Beter onderwijs in Europa'] = 'Better education in Europe';
+optionTranslations['Bevrijdingsdag (5 mei)'] = 'Liberation Day (5 May)';
+optionTranslations['Bij Veilig Thuis'] = 'At Safe Home (domestic violence helpline)';
+optionTranslations['Bij de Belastingdienst'] = 'At the Tax Authority';
+optionTranslations['Bij de SVB — Sociale Verzekeringsbank'] = 'At the Social Insurance Bank';
+optionTranslations['Bij de apotheek'] = 'At the pharmacy';
+optionTranslations['Bij de huisarts'] = 'At the GP';
+optionTranslations['Bij de huisartsenpraktijk'] = 'At the GP practice';
+optionTranslations['Bij de politie via 112'] = 'At the police via 112';
+optionTranslations['Bij de rechtbank'] = 'At the court';
+optionTranslations['Bij de supermarkt'] = 'At the supermarket';
+optionTranslations['Bij een ernstig spoedgeval'] = 'In a serious emergency';
+optionTranslations['Bij een kleine wond'] = 'For a minor wound';
+optionTranslations['Bij het Juridisch Loket'] = 'At the Legal Aid Desk';
+optionTranslations['Bijbaan'] = 'Side job';
+optionTranslations['Bijna 1.836'] = 'Nearly 1,836';
+optionTranslations['Bijstand bij de gemeente'] = 'Social assistance at the municipality';
+optionTranslations['DUO — Dienst Uitvoering Onderwijs'] = 'DUO (Education Executive Agency)';
+optionTranslations['Dat alles is toegestaan in Nederland'] = 'That everything is permitted in the Netherlands';
+optionTranslations['Dat iedereen dezelfde mening moet hebben'] = 'That everyone must have the same opinion';
+optionTranslations['Dat iedereen dezelfde taal spreekt'] = 'That everyone speaks the same language';
+optionTranslations['Dat iedereen hetzelfde is en dezelfde achtergrond heeft'] = 'That everyone is the same with the same background';
+optionTranslations['Dat mensen gescheiden leven in aparte wijken'] = 'That people live separately in different neighbourhoods';
+optionTranslations['Dat sommige mensen meer rechten hebben dan anderen'] = 'That some people have more rights than others';
+optionTranslations['De AVG — Algemene Verordening Gegevensbescherming'] = 'The GDPR (General Data Protection Regulation)';
+optionTranslations['De BRP — Basisregistratie Personen'] = 'The Personal Records Database (BRP)';
+optionTranslations['De CAO-commissie'] = 'The CLA committee';
+optionTranslations['De CITO-toets'] = 'The CITO test';
+optionTranslations['De Eerste Kamer en de Tweede Kamer'] = 'The Senate and the House of Representatives';
+optionTranslations['De Gemeenteraad en de Provinciale Staten'] = 'The Municipal Council and the Provincial Council';
+optionTranslations['De Gemeentewet'] = 'The Municipal Act';
+optionTranslations['De Grondwet'] = 'The Constitution';
+optionTranslations['De IND'] = 'The IND (Immigration and Naturalisation Service)';
+optionTranslations['De Noordzee van de Atlantische Oceaan'] = 'The North Sea from the Atlantic Ocean';
+optionTranslations['De OR geeft WW-uitkeringen aan werknemers'] = 'The works council pays unemployment benefit to employees';
+optionTranslations['De OR regelt de belastingen van het bedrijf'] = 'The works council manages the company\'s taxes';
+optionTranslations['De POH — Praktijkondersteuner Huisarts'] = 'The GP practice nurse (POH)';
+optionTranslations['De RDW — Rijksdienst voor het Wegverkeer'] = 'The Vehicle Authority (RDW)';
+optionTranslations['De Spoedeisende Hulp (SEH)'] = 'The A&E department';
+optionTranslations['De Tweede Kamer'] = 'The House of Representatives';
+optionTranslations['De Tweede Kamer en het kabinet'] = 'The House of Representatives and the cabinet';
+optionTranslations['De WMO — Wet Maatschappelijke Ondersteuning'] = 'The Social Support Act (WMO)';
+optionTranslations['De Wet arbeidsongeschiktheid'] = 'The Disability Act';
+optionTranslations['De Zorgverzekeringswet'] = 'The Health Insurance Act';
+optionTranslations['De advocaat'] = 'The lawyer';
+optionTranslations['De afdeling voor spoedeisende hulp'] = 'The emergency department';
+optionTranslations['De afspraak gewoon vergeten'] = 'Simply forgetting the appointment';
+optionTranslations['De apotheker'] = 'The pharmacist';
+optionTranslations['De bevrijding in 1945'] = 'The liberation in 1945';
+optionTranslations['De dokter mag jouw informatie niet zonder jouw toestemming delen met anderen'] = 'The doctor may not share your information without your consent';
+optionTranslations['De dokter moet alles vertellen aan de zorgverzekering'] = 'The doctor must tell the health insurer everything';
+optionTranslations['De eerste maand huur als extra kosten'] = 'The first month\'s rent as extra costs';
+optionTranslations['De formateur'] = 'The coalition negotiator (formateur)';
+optionTranslations['De geboortedag van de koning'] = 'The king\'s birthday';
+optionTranslations['De gemeente bepaalt welke regels gelden'] = 'The municipality determines which rules apply';
+optionTranslations['De gynaecoloog'] = 'The gynaecologist';
+optionTranslations['De huisarts bellen'] = 'Call the GP';
+optionTranslations['De huisartsenpraktijk'] = 'The GP practice';
+optionTranslations['De koning de hoogste macht heeft'] = 'The king has the highest power';
+optionTranslations['De kwaliteit van producten in winkels'] = 'The quality of products in shops';
+optionTranslations['De lichten aan laten als je de kamer verlaat'] = 'Leaving the lights on when you leave the room';
+optionTranslations['De minister van Financiën'] = 'The Minister of Finance';
+optionTranslations['De oprichting van de EU'] = 'The founding of the EU';
+optionTranslations['De ouders van het kind'] = 'The child\'s parents';
+optionTranslations['De overheid bepaalt welke religie je mag hebben'] = 'The government determines which religion you may have';
+optionTranslations['De overheid beslist over je leven'] = 'The government decides about your life';
+optionTranslations['De persoon zelf via DigiD'] = 'The person themselves via DigiD';
+optionTranslations['De plicht van kinderen om hun ouders te gehoorzamen'] = 'The duty of children to obey their parents';
+optionTranslations['De politie mag alles beslissen'] = 'The police may decide everything';
+optionTranslations['De rechtbank'] = 'The court';
+optionTranslations['De rechtsstaat'] = 'The constitutional state';
+optionTranslations['De regels van de kerk of moskee'] = 'The rules of the church or mosque';
+optionTranslations['De regels voor afvalscheiding op het werk'] = 'The waste separation rules at work';
+optionTranslations['De regels voor het aanvragen van bijstand'] = 'The rules for applying for social assistance';
+optionTranslations['De religieuze regels zijn belangrijker'] = 'The religious rules are more important';
+optionTranslations['De school van het kind'] = 'The child\'s school';
+optionTranslations['De specialist in het ziekenhuis'] = 'The hospital specialist';
+optionTranslations['De spoedafdeling voor levensgevaarlijke situaties'] = 'The emergency department for life-threatening situations';
+optionTranslations['De systematische moord op zes miljoen Joodse mensen door de nazi\'s'] = 'The systematic murder of six million Jewish people by the Nazis';
+optionTranslations['De systematische moord op zes miljoen Joodse mensen door de nazi\'s tijdens de Tweede Wereldoorlog'] = 'The systematic murder of six million Jewish people by the Nazis during WWII';
+optionTranslations['De tijd waarop je de huisarts kunt bezoeken voor een consult'] = 'The time when you can visit the GP for a consultation';
+optionTranslations['De tradities van de plaatselijke gemeenschap'] = 'The traditions of the local community';
+optionTranslations['De universiteit'] = 'University';
+optionTranslations['De veiligheid van het verkeer op de weg'] = 'Road traffic safety';
+optionTranslations['De verdeling van Nederland in 12 provincies'] = 'The division of the Netherlands into 12 provinces';
+optionTranslations['De verdeling van belastinggeld over de provincies'] = 'The distribution of tax money among the provinces';
+optionTranslations['De verwarming hoger zetten'] = 'Turning the heating higher';
+optionTranslations['De verwarming lager zetten en lichten uitdoen als je de kamer verlaat'] = 'Turning the heating lower and switching off lights when leaving the room';
+optionTranslations['De werkgever'] = 'The employer';
+optionTranslations['De wetten van de staat'] = 'The laws of the state';
+optionTranslations['De zorgverzekering betaalt alles gewoon'] = 'The health insurance pays everything as normal';
+optionTranslations['De zorgverzekering betaalt de kosten van de specialist meestal niet'] = 'The health insurance usually does not pay the specialist\'s costs';
+optionTranslations['DigiD.nl'] = 'DigiD.nl (government ID website)';
+optionTranslations['Direct de politie bellen met 112'] = 'Call the police directly on 112';
+optionTranslations['Direct de specialist'] = 'Directly to the specialist';
+optionTranslations['Discriminatie is in sommige gevallen toegestaan'] = 'Discrimination is permitted in certain cases';
+optionTranslations['Discrimineren op basis van afkomst, geslacht of religie'] = 'Discriminating on the basis of origin, gender or religion';
+optionTranslations['Een DigiD'] = 'A DigiD account';
+optionTranslations['Een DigiD account'] = 'A DigiD account';
+optionTranslations['Een aanvraagformulier voor de WW-uitkering'] = 'An application form for unemployment benefit';
+optionTranslations['Een advocaat'] = 'A lawyer';
+optionTranslations['Een afdeling van het ziekenhuis waar je een specialist bezoekt zonder opname'] = 'A hospital department where you see a specialist without being admitted';
+optionTranslations['Een afdeling waar je meerdere dagen wordt opgenomen'] = 'A department where you are admitted for several days';
+optionTranslations['Een andere huisarts die haar taal spreekt'] = 'Another GP who speaks her language';
+optionTranslations['Een apotheek in het ziekenhuis'] = 'A pharmacy in the hospital';
+optionTranslations['Een avondcursus voor volwassenen met een baan'] = 'An evening course for working adults';
+optionTranslations['Een bank die hypotheken geeft'] = 'A bank that provides mortgages';
+optionTranslations['Een bedrijf dat huizen bouwt om te verkopen'] = 'A company that builds houses for sale';
+optionTranslations['Een belastingformulier'] = 'A tax form';
+optionTranslations['Een betaalde vakantie'] = 'A paid holiday';
+optionTranslations['Een bewijs dat je belasting hebt betaald'] = 'Proof that you have paid tax';
+optionTranslations['Een bijscholing'] = 'Further training / professional development';
+optionTranslations['Een computervirus'] = 'A computer virus';
+optionTranslations['Een contract voor vrijwilligerswerk'] = 'A contract for voluntary work';
+optionTranslations['Een doktersverklaring'] = 'A doctor\'s certificate';
+optionTranslations['Een doktersverklaring en rijbewijs'] = 'A doctor\'s certificate and driving licence';
+optionTranslations['Een doorverwijzing naar de specialist'] = 'A referral to the specialist';
+optionTranslations['Een eigen risico'] = 'A deductible';
+optionTranslations['Een factuur voor de gemeentelijke belasting'] = 'An invoice for municipal tax';
+optionTranslations['Een gratis energiepakket voor mensen met een laag inkomen'] = 'A free energy package for low-income people';
+optionTranslations['Een hongersnood in Nederland in de Tweede Wereldoorlog'] = 'A famine in the Netherlands during the Second World War';
+optionTranslations['Een huurcontract tekenen'] = 'Signing a rental contract';
+optionTranslations['Een hypotheek aanvragen'] = 'Applying for a mortgage';
+optionTranslations['Een identiteitsbewijs voor het ziekenhuis'] = 'An identity document for the hospital';
+optionTranslations['Een jaarrekening'] = 'An annual bill';
+optionTranslations['Een korting op de huurprijs bij lang huren'] = 'A discount on rent for long-term renting';
+optionTranslations['Een lening van de bank om een huis te kopen'] = 'A bank loan to buy a house';
+optionTranslations['Een lijst van medicijnen in de apotheek'] = 'A list of medicines at the pharmacy';
+optionTranslations['Een makelaar'] = 'An estate agent';
+optionTranslations['Een militair bondgenootschap'] = 'A military alliance';
+optionTranslations['Een nieuwe afspraak maken'] = 'Making a new appointment';
+optionTranslations['Een noodopvang voor patiënten'] = 'Emergency shelter for patients';
+optionTranslations['Een notaris'] = 'A notary';
+optionTranslations['Een nuluren contract'] = 'A zero-hours contract';
+optionTranslations['Een opleiding die je doet na het afronden van een andere opleiding om hoger te gaan'] = 'A course done after completing a previous qualification to advance';
+optionTranslations['Een opleiding voor sociaal werk'] = 'A course for social work';
+optionTranslations['Een overeenkomst tussen werkgevers en vakbonden'] = 'An agreement between employers and trade unions';
+optionTranslations['Een overzicht van al jouw medische informatie bij de huisarts'] = 'An overview of all your medical information at the GP';
+optionTranslations['Een paspoort'] = 'A passport';
+optionTranslations['Een periode van werkervaring in een bedrijf als onderdeel van een opleiding'] = 'A period of work experience at a company as part of a course';
+optionTranslations['Een politieke partij'] = 'A political party';
+optionTranslations['Een politieke partij in de 17e eeuw'] = 'A political party in the 17th century';
+optionTranslations['Een professionele tolk'] = 'A professional interpreter';
+optionTranslations['Een recept dat je bij twee apotheken tegelijk kunt gebruiken'] = 'A prescription you can use at two pharmacies simultaneously';
+optionTranslations['Een recept voor medicijnen die je al lang gebruikt en regelmatig opnieuw nodig hebt'] = 'A prescription for medicine you have been using long-term and need regularly';
+optionTranslations['Een recept voor nieuwe medicijnen na een consult'] = 'A prescription for new medicine after a consultation';
+optionTranslations['Een reisdocument voor vakanties buiten de EU'] = 'A travel document for holidays outside the EU';
+optionTranslations['Een rekening van de gemeente voor afvalinzameling'] = 'A bill from the municipality for waste collection';
+optionTranslations['Een schoolinspecteur die leerlingen controleert'] = 'A school inspector who monitors pupils';
+optionTranslations['Een schriftelijke vertaling van het recept'] = 'A written translation of the prescription';
+optionTranslations['Een servicekostenoverzicht'] = 'A service charge overview';
+optionTranslations['Een soort computervirus'] = 'A type of computer virus';
+optionTranslations['Een subsidie van de overheid voor woningeigenaren'] = 'A government subsidy for homeowners';
+optionTranslations['Een taalcursus alleen voor kinderen'] = 'A language course only for children';
+optionTranslations['Een tarief dat voor een jaar hetzelfde blijft'] = 'A rate that stays the same for a year';
+optionTranslations['Een telefonische dienst van het ziekenhuis'] = 'A telephone service from the hospital';
+optionTranslations['Een toets aan het einde van de basisschool'] = 'A test at the end of primary school';
+optionTranslations['Een uitkering voor studenten'] = 'A benefit for students';
+optionTranslations['Een verdrag tussen Nederland en andere landen'] = 'A treaty between the Netherlands and other countries';
+optionTranslations['Een vergunning om een bedrijf te starten'] = 'A permit to start a business';
+optionTranslations['Een verplichte bijdrage voor schoolreisjes'] = 'A mandatory contribution for school trips';
+optionTranslations['Een verplichte vakantie voor nieuwe inwoners'] = 'A mandatory holiday for new residents';
+optionTranslations['Een vluchtelingencrisis na de Eerste Wereldoorlog'] = 'A refugee crisis after the First World War';
+optionTranslations['Een wet over huisvesting'] = 'A law about housing';
+optionTranslations['Een wet van de gemeente'] = 'A law of the municipality';
+optionTranslations['Een woningcorporatie'] = 'A housing association';
+optionTranslations['Elke dag, je kunt het altijd buiten zetten'] = 'Every day, you can always put it out';
+optionTranslations['Elke week naar UWV gaan'] = 'Going to the UWV office every week';
+optionTranslations['Elke week naar het UWV kantoor gaan'] = 'Going to the UWV office every week';
+optionTranslations['Er is geen gevolg'] = 'There is no consequence';
+optionTranslations['Extra belasting van de gemeente'] = 'Extra tax from the municipality';
+optionTranslations['Extra belasting van de overheid'] = 'Extra tax from the government';
+optionTranslations['Extra les na school voor kinderen die achterlopen'] = 'Extra lessons after school for children who are behind';
+optionTranslations['Fraude plegen met een computer'] = 'Committing fraud with a computer';
+optionTranslations['Gedwongen huwelijken zijn verboden in Nederland'] = 'Forced marriages are forbidden in the Netherlands';
+optionTranslations['Geen belasting betalen in andere EU-landen'] = 'Not paying tax in other EU countries';
+optionTranslations['Geen belasting betalen in andere landen'] = 'Not paying tax in other countries';
+optionTranslations['Gekozen door de inwoners'] = 'Elected by the residents';
+optionTranslations['Gelijkheid / Discriminatie'] = 'Equality / Discrimination';
+optionTranslations['Goud, zilver en diamanten'] = 'Gold, silver and diamonds';
+optionTranslations['Gratis en vertrouwelijke hulp bij persoonlijke problemen'] = 'Free and confidential help with personal problems';
+optionTranslations['Gratis zorgverzekering in alle EU-landen'] = 'Free health insurance in all EU countries';
+optionTranslations['Gratis zorgverzekering in alle landen'] = 'Free health insurance in all countries';
+optionTranslations['HBO'] = 'HBO (Higher Professional Education)';
+optionTranslations['Haar afval naar een andere gemeente brengen'] = 'Taking her waste to another municipality';
+optionTranslations['Halloween (31 oktober)'] = 'Halloween (31 October)';
+optionTranslations['Havo'] = 'HAVO (secondary school)';
+optionTranslations['Het Burgerlijk Wetboek'] = 'The Civil Code';
+optionTranslations['Het consultatiebureau'] = 'The consultation centre';
+optionTranslations['Het consultatiebureau van de GGD'] = 'The GGD consultation centre';
+optionTranslations['Het geeft aan wanneer de school open is voor ouderavonden'] = 'It shows when the school is open for parents\' evenings';
+optionTranslations['Het havo'] = 'HAVO (secondary school)';
+optionTranslations['Het hbo'] = 'HBO (Higher Professional Education)';
+optionTranslations['Het hbo of de universiteit'] = 'HBO or university';
+optionTranslations['Het inschrijven bij de gemeente'] = 'Registering at the municipality';
+optionTranslations['Het is een overzicht van alle toetsen in het jaar'] = 'It is an overview of all tests in the year';
+optionTranslations['Het kabinet'] = 'The cabinet';
+optionTranslations['Het kabinet en de Tweede Kamer'] = 'The cabinet and the House of Representatives';
+optionTranslations['Het kind zelf'] = 'The child itself';
+optionTranslations['Het laat zien wanneer de schoolvakanties zijn'] = 'It shows when the school holidays are';
+optionTranslations['Het leerplan'] = 'The curriculum';
+optionTranslations['Het mbo niveau 1'] = 'MBO level 1';
+optionTranslations['Het poldermodel'] = 'The polder model (consensus politics)';
+optionTranslations['Het recht om een politieke partij op te richten'] = 'The right to found a political party';
+optionTranslations['Het recht om je kandidaat te stellen voor een gekozen functie'] = 'The right to stand as a candidate for an elected position';
+optionTranslations['Het recht om niet te stemmen'] = 'The right not to vote';
+optionTranslations['Het recht om te stemmen'] = 'The right to vote';
+optionTranslations['Het recht van de school om regels te maken voor kinderen'] = 'The school\'s right to make rules for children';
+optionTranslations['Het salaris inclusief vakantiegeld en bonus'] = 'Salary including holiday pay and bonus';
+optionTranslations['Het schoolrapport'] = 'The school report';
+optionTranslations['Het staatsexamen'] = 'The state exam';
+optionTranslations['Het toelatingsexamen'] = 'The entrance exam';
+optionTranslations['Het vakantierooster'] = 'The holiday schedule';
+optionTranslations['Het vmbo'] = 'VMBO (pre-vocational secondary education)';
+optionTranslations['Het wachtwoord alleen via e-mail sturen'] = 'Sending the password only by email';
+optionTranslations['Het wachtwoord sturen als de persoon vriendelijk klinkt'] = 'Sending the password if the person sounds friendly';
+optionTranslations['Het waterschap geeft rijbewijzen uit'] = 'The water board issues driving licences';
+optionTranslations['Het waterschap regelt de drinkwaterrekening'] = 'The water board handles the drinking water bill';
+optionTranslations['Hij betaalt meer dan normaal'] = 'He pays more than normal';
+optionTranslations['Hij bezoekt alle 12 provincies'] = 'He visits all 12 provinces';
+optionTranslations['Hij bouwde de Deltawerken'] = 'He built the Delta Works';
+optionTranslations['Hij bouwde de Deltawerken na de Watersnoodramp'] = 'He built the Delta Works after the flood disaster';
+optionTranslations['Hij geeft juridisch advies bij rechtszaken'] = 'He gives legal advice in legal cases';
+optionTranslations['Hij geeft medicijnen uit zonder recept'] = 'He dispenses medicines without a prescription';
+optionTranslations['Hij helpt de huisarts en heeft meer tijd per patiënt'] = 'He helps the GP and has more time per patient';
+optionTranslations['Hij leidde de opstand tegen Spanje'] = 'He led the revolt against Spain';
+optionTranslations['Hij ondertekent de begroting van de gemeente'] = 'He signs the municipal budget';
+optionTranslations['Hij regelt je energiecontract'] = 'He arranges your energy contract';
+optionTranslations['Hij reist gratis terug'] = 'He travels back for free';
+optionTranslations['Hij stichtte Amsterdam'] = 'He founded Amsterdam';
+optionTranslations['Hij stichtte de stad Amsterdam'] = 'He founded the city of Amsterdam';
+optionTranslations['Hij werkt in het ziekenhuis'] = 'He works in the hospital';
+optionTranslations['Hoe je DigiD aanvraagt en gebruikt'] = 'How to apply for and use DigiD';
+optionTranslations['Hoe je belasting betaalt en een huis koopt'] = 'How to pay tax and buy a house';
+optionTranslations['Huur en servicekosten'] = 'Rent and service charges';
+optionTranslations['Hypotheek, pensioen, zorgverzekering, studiefinanciering'] = 'Mortgage, pension, health insurance, student finance';
+optionTranslations['Iedereen belasting moet betalen'] = 'Everyone must pay tax';
+optionTranslations['Iedereen die na hun 50e in Nederland heeft gewerkt'] = 'Everyone who has worked in the Netherlands after their 50th birthday';
+optionTranslations['Iedereen gelijk behandeld moet worden'] = 'Everyone must be treated equally';
+optionTranslations['Iedereen moet naar de kerk'] = 'Everyone must go to church';
+optionTranslations['Immigratie aanvragen bij de gemeente'] = 'Applying for immigration at the municipality';
+optionTranslations['In het BSN-register'] = 'In the BSN register';
+optionTranslations['In- en uit te checken in het openbaar vervoer'] = 'To check in and out of public transport';
+optionTranslations['Inburgeringscursussen organiseren'] = 'Organising integration courses';
+optionTranslations['Internet en televisie'] = 'Internet and television';
+optionTranslations['Ja, een stagiair krijgt altijd het minimumloon'] = 'Yes, an intern always gets the minimum wage';
+optionTranslations['Ja, een stagiair verdient meer dan een vaste medewerker'] = 'Yes, an intern earns more than a permanent employee';
+optionTranslations['Ja, haat en discriminatie van Joodse mensen is verboden'] = 'Yes, hatred and discrimination of Jewish people is forbidden';
+optionTranslations['Ja, je hebt altijd het recht om je eigen dossier te bekijken'] = 'Yes, you always have the right to view your own file';
+optionTranslations['Ja, je hebt altijd het recht om je eigen medisch dossier in te zien'] = 'Yes, you always have the right to view your own medical record';
+optionTranslations['Ja, kinderen zijn leerplichtig vanaf 4 jaar'] = 'Yes, children must attend school from age 4';
+optionTranslations['Ja, maar alleen bij bepaalde religies'] = 'Yes, but only for certain religions';
+optionTranslations['Jana krijgt een boete van de gemeente'] = 'Jana receives a fine from the municipality';
+optionTranslations['Je bankrekeningnummer'] = 'Your bank account number';
+optionTranslations['Je belastingaangifte'] = 'Your tax return';
+optionTranslations['Je belt 112'] = 'You call 112';
+optionTranslations['Je belt de HAP'] = 'You call the out-of-hours GP post';
+optionTranslations['Je bent alleen geregistreerd als je een formulier invult bij de huisarts'] = 'You are only registered if you fill in a form at the GP';
+optionTranslations['Je brutoloon plus vakantiegeld'] = 'Your gross salary plus holiday pay';
+optionTranslations['Je eigen schade bij een ongeluk'] = 'Your own damage in an accident';
+optionTranslations['Je favoriete sport'] = 'Your favourite sport';
+optionTranslations['Je gaat naar de SEH'] = 'You go to A&E';
+optionTranslations['Je hoeft de dokter niets te vertellen over je gezondheid'] = 'You do not need to tell the doctor anything about your health';
+optionTranslations['Je inschrijven bij de gemeente in de BRP'] = 'Registering at the municipality in the BRP';
+optionTranslations['Je klasgenoten iets lekkers geven, vaak op je verjaardag'] = 'Giving your classmates something tasty, often on your birthday';
+optionTranslations['Je maandelijkse huur als je die niet kunt betalen'] = 'Your monthly rent if you cannot pay it';
+optionTranslations['Je moet je zelf aanmelden via de apotheek'] = 'You must register yourself via the pharmacy';
+optionTranslations['Je naam of geboortejaar'] = 'Your name or year of birth';
+optionTranslations['Je organen doneren aan een museum'] = 'Donating your organs to a museum';
+optionTranslations['Je salaris inclusief bonus'] = 'Your salary including bonus';
+optionTranslations['Je salaris inclusief vakantiegeld'] = 'Your salary including holiday pay';
+optionTranslations['Je salaris na aftrek van belasting'] = 'Your salary after deduction of tax';
+optionTranslations['Je totale salaris vóór belasting'] = 'Your total salary before tax';
+optionTranslations['Je werkgever bepaalt je werktijden'] = 'Your employer determines your working hours';
+optionTranslations['Kinderen met leermoeilijkheden'] = 'Children with learning difficulties';
+optionTranslations['Kinderen op de basisschool'] = 'Children at primary school';
+optionTranslations['Koningsdag — de verjaardag van de koning'] = 'King\'s Day — the king\'s birthday';
+optionTranslations['Kosten voor gas, water, licht en onderhoud naast de huur'] = 'Costs for gas, water, electricity and maintenance besides the rent';
+optionTranslations['Kosten voor internetaansluiting'] = 'Costs for internet connection';
+optionTranslations['Kosten voor parkeren bij het huis'] = 'Parking costs at the house';
+optionTranslations['KvK en DUO'] = 'Chamber of Commerce and DUO';
+optionTranslations['KvK-nummer'] = 'Chamber of Commerce registration number';
+optionTranslations['MBO — Middelbaar Beroepsonderwijs'] = 'MBO (Secondary Vocational Education)';
+optionTranslations['Meer dan 10.000'] = 'More than 10,000';
+optionTranslations['Mensen die Nederlands niet als moedertaal hebben'] = 'People who do not have Dutch as their mother tongue';
+optionTranslations['Mensen met diabetes'] = 'People with diabetes';
+optionTranslations['Mensen van 67 jaar of ouder die in Nederland hebben gewoond of gewerkt'] = 'People aged 67 or older who have lived or worked in the Netherlands';
+optionTranslations['Middelbaar beroepsonderwijs'] = 'Secondary vocational education (MBO)';
+optionTranslations['Monarchie'] = 'Monarchy';
+optionTranslations['Naar het hbo — hoger beroepsonderwijs'] = 'To HBO (higher professional education)';
+optionTranslations['Nederlanders vermijden moeilijke gesprekken'] = 'The Dutch avoid difficult conversations';
+optionTranslations['Nederlanders zeggen eerlijk wat ze denken zonder omwegen'] = 'The Dutch say honestly what they think without beating around the bush';
+optionTranslations['Nederlanders zijn vaak boos en agressief'] = 'The Dutch are often angry and aggressive';
+optionTranslations['Nee, alleen de dokter mag het dossier bekijken'] = 'No, only the doctor may view the file';
+optionTranslations['Nee, dat is niet toegestaan'] = 'No, that is not permitted';
+optionTranslations['Nee, de huisarts valt er niet onder'] = 'No, the GP is not subject to it';
+optionTranslations['Nee, een stage is vaak onbetaald of krijgt alleen een kleine stagevergoeding'] = 'No, an internship is often unpaid or receives only a small allowance';
+optionTranslations['Nee, het is vrije meningsuiting'] = 'No, it is freedom of expression';
+optionTranslations['Nee, je moet altijd doen wat de baas zegt'] = 'No, you must always do what the boss says';
+optionTranslations['Nee, leerplicht begint op 6 jaar'] = 'No, compulsory education starts at age 6';
+optionTranslations['Nee, leerplicht begint pas op 5 jaar'] = 'No, compulsory education only starts at age 5';
+optionTranslations['Niets — 20 minuten te laat is normaal in Nederland'] = 'Nothing — 20 minutes late is normal in the Netherlands';
+optionTranslations['Niets, het gaat automatisch'] = 'Nothing, it happens automatically';
+optionTranslations['Niets, het mag'] = 'Nothing, it is allowed';
+optionTranslations['Niets, je wacht op een nieuwe baan'] = 'Nothing, you wait for a new job';
+optionTranslations['Nooit zijn BSN of wachtwoord online delen met onbekenden'] = 'Never share your BSN or password online with strangers';
+optionTranslations['Noord-Holland van Friesland'] = 'North Holland from Friesland';
+optionTranslations['OV-chipkaart'] = 'OV-chip card (public transport card)';
+optionTranslations['Om een rijbewijs aan te vragen bij de gemeente'] = 'To apply for a driving licence at the municipality';
+optionTranslations['Om een uitkering aan te vragen bij UWV'] = 'To apply for a benefit at UWV';
+optionTranslations['Om geld te verdienen voor haar studie'] = 'To earn money for her studies';
+optionTranslations['Om je adres te registreren bij de gemeente'] = 'To register your address at the municipality';
+optionTranslations['Om je identiteitsbewijs te vervangen'] = 'To replace your identity document';
+optionTranslations['Om je in te schrijven bij een nieuwe huisarts'] = 'To register with a new GP';
+optionTranslations['Om medicijnen te halen bij de apotheek'] = 'To collect medicine from the pharmacy';
+optionTranslations['Om meer vis te kunnen vangen'] = 'To be able to catch more fish';
+optionTranslations['Om naar een specialist in het ziekenhuis te gaan'] = 'To go to a hospital specialist';
+optionTranslations['Om nieuwe steden te bouwen'] = 'To build new cities';
+optionTranslations['Om online boodschappen te doen'] = 'To do online shopping';
+optionTranslations['Om online te winkelen bij Nederlandse webshops'] = 'To shop at Dutch online shops';
+optionTranslations['Om te laten zien hoeveel je hebt verdiend, zodat de Belastingdienst berekent hoeveel belasting je betaalt'] = 'To show how much you earned so the Tax Authority can calculate your tax';
+optionTranslations['Om te studeren aan de universiteit'] = 'To study at university';
+optionTranslations['Om vakantie te combineren met werk'] = 'To combine holiday with work';
+optionTranslations['Omdat de koning de partijen kiest'] = 'Because the king chooses the parties';
+optionTranslations['Omdat er maar twee partijen zijn'] = 'Because there are only two parties';
+optionTranslations['Onbetaald werk dat je doet voor de samenleving en dat gewaardeerd wordt'] = 'Unpaid work you do for society that is appreciated';
+optionTranslations['Onbetaald werk dat je doet voor de samenleving of een organisatie'] = 'Unpaid work you do for society or an organisation';
+optionTranslations['Onbetaald werk dat je vrijwillig doet voor de samenleving'] = 'Unpaid work you voluntarily do for society';
+optionTranslations['Ongeveer 500'] = 'About 500';
+optionTranslations['Online aangifte te doen bij de Belastingdienst'] = 'To file a tax return online at the Tax Authority';
+optionTranslations['Online fraude'] = 'Online fraud';
+optionTranslations['Ouders die actief meedoen aan het schoolleven en contact houden met de leerkracht'] = 'Parents who actively participate in school life and keep in touch with the teacher';
+optionTranslations['Ouders die financieel bijdragen aan de school'] = 'Parents who contribute financially to the school';
+optionTranslations['Ouders die hun kind iedere dag brengen en halen'] = 'Parents who drop off and pick up their child every day';
+optionTranslations['Over Willem van Oranje, de \'Vader des Vaderlands\''] = 'About William of Orange, the \'Father of the Fatherland\'';
+optionTranslations['Over de Watersnoodramp van 1953'] = 'About the 1953 flood disaster';
+optionTranslations['Over de bevrijding in 1945'] = 'About the liberation in 1945';
+optionTranslations['Overlast melden bij de verhuurder of gemeente'] = 'Reporting nuisance to the landlord or municipality';
+optionTranslations['Overwerk'] = 'Overtime';
+optionTranslations['Paspoorten afgeven aan inwoners'] = 'Issuing passports to residents';
+optionTranslations['Paspoorten uitgeven aan Nederlandse burgers'] = 'Issuing passports to Dutch citizens';
+optionTranslations['Passief kiesrecht'] = 'Passive right to vote (standing as a candidate)';
+optionTranslations['Recht op een bedrijfsauto'] = 'Right to a company car';
+optionTranslations['Recht op een eigen kantoor'] = 'Right to a personal office';
+optionTranslations['Regels over afvalscheiding'] = 'Rules about waste separation';
+optionTranslations['Regels voor sociale huurwoningen'] = 'Rules for social housing';
+optionTranslations['Schuldhulpverlening bij de gemeente'] = 'Debt assistance at the municipality';
+optionTranslations['Studenten aan de universiteit'] = 'University students';
+optionTranslations['Studenten met schulden'] = 'Students with debts';
+optionTranslations['Te betalen in de supermarkt'] = 'To be paid at the supermarket';
+optionTranslations['Toegestaan in bepaalde gevallen'] = 'Permitted in certain cases';
+optionTranslations['Tot 21 jaar'] = 'Until age 21';
+optionTranslations['UWV en SVB'] = 'UWV and Social Insurance Bank';
+optionTranslations['UWV — Uitvoeringsinstituut Werknemersverzekeringen'] = 'UWV (Employee Insurance Agency)';
+optionTranslations['VWO — Voorbereidend Wetenschappelijk Onderwijs'] = 'VWO (pre-university education)';
+optionTranslations['Valentijnsdag (14 februari)'] = 'Valentine\'s Day (14 February)';
+optionTranslations['Van tevoren bellen om te zeggen dat je laat bent'] = 'Calling in advance to say you will be late';
+optionTranslations['Vanaf 12 jaar'] = 'From age 12';
+optionTranslations['Vanaf 16 jaar'] = 'From age 16';
+optionTranslations['Vast tarief'] = 'Fixed rate';
+optionTranslations['Verblijfsvergunning aanvragen bij het Juridisch Loket'] = 'Applying for a residence permit at the Legal Aid Desk';
+optionTranslations['Verboden op grond van Artikel 1 van de Grondwet'] = 'Forbidden under Article 1 of the Constitution';
+optionTranslations['Verkeersboetes uitschrijven en innen'] = 'Issuing and collecting traffic fines';
+optionTranslations['Verplicht kiesrecht'] = 'Compulsory voting';
+optionTranslations['Verplicht voor iedereen die een bijstandsuitkering heeft'] = 'Mandatory for everyone receiving social assistance';
+optionTranslations['Verplicht werk via de gemeente'] = 'Mandatory work via the municipality';
+optionTranslations['Vervolgopleiding'] = 'Follow-on degree / further education';
+optionTranslations['Via UWV.nl met je paspoort'] = 'Via UWV.nl with your passport';
+optionTranslations['Voor 1 augustus'] = 'Before 1 August';
+optionTranslations['Voor een arbeidscontract'] = 'For an employment contract';
+optionTranslations['Voor het aanvragen van DigiD'] = 'For applying for DigiD';
+optionTranslations['Voorbereidend Middelbaar Bewegingsonderwijs'] = 'Pre-vocational physical education';
+optionTranslations['Vragen naar werkervaring en diploma\'s'] = 'Asking about work experience and qualifications';
+optionTranslations['Vragen om een CV en motivatiebrief'] = 'Asking for a CV and cover letter';
+optionTranslations['Vrede en veiligheid in de wereld'] = 'Peace and security in the world';
+optionTranslations['Vrijwillig bloed geven bij het ziekenhuis'] = 'Voluntarily donating blood at the hospital';
+optionTranslations['WA-verzekering'] = 'Third-party liability insurance (WA)';
+optionTranslations['WW en bijstand'] = 'Unemployment benefit and social assistance';
+optionTranslations['WW-uitkering bij UWV'] = 'Unemployment benefit at UWV';
+optionTranslations['WW-uitkeringen en AOW-pensioenen'] = 'Unemployment benefits and state pensions';
+optionTranslations['Wapens, specerijen en textiel'] = 'Weapons, spices and textiles';
+optionTranslations['Wegen aanleggen en onderhouden'] = 'Building and maintaining roads';
+optionTranslations['Werk dat je alleen \'s avonds en \'s nachts doet'] = 'Work you do only in the evenings and at night';
+optionTranslations['Werk dat je verplicht doet als je een uitkering hebt'] = 'Work you are required to do when receiving a benefit';
+optionTranslations['Werk waarbij je meer uren maakt dan fulltime'] = 'Work where you work more hours than full-time';
+optionTranslations['Werken, werk zoeken en meedoen in de Nederlandse samenleving'] = 'Working, job searching and participating in Dutch society';
+optionTranslations['Werkloze mensen'] = 'Unemployed people';
+optionTranslations['Wet boven religie'] = 'Law above religion';
+optionTranslations['Ze geven medicijnen uit'] = 'They dispense medicines';
+optionTranslations['Ze helpen bij psychische problemen zoals depressie'] = 'They help with mental health problems such as depression';
+optionTranslations['Ze organiseren vaccinaties'] = 'They organise vaccinations';
+optionTranslations['Ze vermijden moeilijke gesprekken'] = 'They avoid difficult conversations';
+optionTranslations['Ze zijn vaak boos'] = 'They are often angry';
+optionTranslations['Zorgtoeslag bij de Belastingdienst'] = 'Healthcare allowance at the Tax Authority';
+optionTranslations['Zorgtoeslag en huurtoeslag'] = 'Healthcare allowance and rent allowance';
+optionTranslations['Zorgverzekeringen en toeslagen'] = 'Health insurance and allowances';
+optionTranslations['Zwangere vrouwen en bevallingen'] = 'Pregnant women and childbirth';
+
+// ─── BLANK QUESTION TRANSLATIONS ───────────────────────────────────────────────
+var blankQuestionTranslations = {
+  'Fatima belt de _____ omdat ze al drie dagen koorts heeft.': 'Fatima calls the GP because she has had a fever for three days.',
+  'Omar gaat naar de _____ voor zijn bloeddrukcontrole, omdat de huisarts weinig tijd heeft.': 'Omar goes to the practice nurse for his blood pressure check because the GP has little time.',
+  'Elke maand betaalt Sara €140 premie voor haar _____.': 'Sara pays €140 in premium every month for her health insurance.',
+  'Kees betaalt zijn eerste ziekenhuisbezoek zelf, want hij heeft het _____ nog niet bereikt.': 'Kees pays for his first hospital visit himself because he has not yet reached his deductible.',
+  'Nadia verdient weinig en krijgt elke maand €120 _____ van de Belastingdienst.': 'Nadia earns little and receives €120 healthcare allowance every month from the Tax Authority.',
+  'Ahmed ziet een man op straat vallen en belt meteen _____.': 'Ahmed sees a man collapse in the street and immediately calls 112.',
+  '\'s Avonds belt Mirjam de _____ omdat haar kind plotseling hoge koorts heeft.': 'In the evening Mirjam calls the out-of-hours post because her child suddenly has a high fever.',
+  'Boris rijdt met zijn fiets tegen een auto en wordt met spoed naar de _____ gebracht.': 'Boris cycles into a car and is rushed to A&E.',
+  'Daan haalt zijn antibiotica op bij de _____ met het recept van de dokter.': 'Daan picks up his antibiotics at the pharmacy using the prescription from the doctor.',
+  'Eva is zwanger en gaat elke maand naar de _____ voor een controle.': 'Eva is pregnant and visits the midwife every month for a check-up.',
+  'Na de verwijzing van de huisarts maakt Lisa een afspraak bij de _____ voor haar angststoornis.': 'After the GP referral Lisa makes an appointment at mental healthcare for her anxiety disorder.',
+  'Pita gaat twee keer per jaar naar de _____ voor een controle en tandenreiniging.': 'Pita goes to the dentist twice a year for a check-up and teeth cleaning.',
+  'De dokter vertelt niets over de ziekte van Fatima aan haar werkgever — dat is het _____.': 'The doctor tells Fatima\'s employer nothing about her illness — that is medical confidentiality.',
+  'Carlos spreekt geen Nederlands, dus vraagt de huisartsenpraktijk een _____ aan voor het consult.': 'Carlos does not speak Dutch so the GP practice arranges an interpreter for the consultation.',
+  'Mirjam gaat naar de _____ van het ziekenhuis voor een echo van haar knie.': 'Mirjam goes to the hospital outpatient clinic for an ultrasound of her knee.',
+  'Zonder _____ van de huisarts weigerde het ziekenhuis een afspraak te maken bij de specialist.': 'Without a referral letter from the GP the hospital refused to make an appointment with the specialist.',
+  'Nour vraagt online een _____ aan voor haar bloeddrukpillen zonder naar de huisarts te gaan.': 'Nour requests a repeat prescription for her blood pressure tablets online without visiting the GP.',
+  'Daan vraagt zijn nieuwe huisarts om zijn _____ op te vragen bij zijn vorige huisarts.': 'Daan asks his new GP to request his medical record from his previous GP.',
+  'Sara belt \'s ochtends voor een afspraak tijdens het _____ van de middag.': 'Sara calls in the morning to make an appointment for the afternoon surgery hours.',
+  'Omar schrijft zich in bij Woningnet voor een sociale huurwoning van een _____.': 'Omar registers on Woningnet for a social housing property from a housing association.',
+  'Omdat Fatima weinig verdient, krijgt zij elke maand _____ van de Belastingdienst.': 'Because Fatima earns little she receives rent allowance from the Tax Authority every month.',
+  'Ahmed schrijft zich binnen vijf dagen in bij de gemeente nadat hij naar zijn nieuwe adres verhuist. [_____]': 'Ahmed registers with the municipality within five days of moving to his new address.',
+  'Voordat Mirjam het _____ tekent, leest ze alle regels goed door.': 'Before Mirjam signs the rental contract she reads all the rules carefully.',
+  'In Amsterdam gooit Nadia haar plastic in de gele container en haar GFT in de groene container. [_____]': 'In Amsterdam Nadia puts her plastic in the yellow container and her organic waste in the green container.',
+  'Tom vindt zijn huurverhoging onterecht en stapt naar de _____ voor een oordeel.': 'Tom considers his rent increase unjustified and goes to the Rent Tribunal for a ruling.',
+  'Yuki sluit een _____ af van €280.000 om haar eerste huis te kunnen kopen.': 'Yuki takes out a mortgage of €280,000 to buy her first house.',
+  'Na de verhuizing regelt Lars een nieuw _____ met een energieleverancier voor gas en elektriciteit.': 'After moving Lars arranges a new energy contract with a supplier for gas and electricity.',
+  'De buren van Pieter maken elke nacht lawaai, dus meldt hij de _____ bij de verhuurder.': 'Pieter\'s neighbours make noise every night so he reports the nuisance to the landlord.',
+  'Als eigenaar van appartement 3B is Karim automatisch lid van de _____ en betaalt hij €80 per maand.': 'As owner of apartment 3B Karim is automatically a member of the homeowners\' association and pays €80 per month.',
+  'Lars huurt een _____ in om hem te helpen bij het zoeken naar een huis in Utrecht.': 'Lars hires an estate agent to help him find a house in Utrecht.',
+  'Rosa doet een _____ van €350.000 op het huis en wacht gespannen op het antwoord van de verkoper.': 'Rosa makes an offer of €350,000 on the house and waits nervously for the seller\'s response.',
+  'Voordat Ibrahim de sleutel krijgt, betaalt hij een _____ van twee maanden huur aan de verhuurder.': 'Before Ibrahim receives the key he pays a deposit of two months\' rent to the landlord.',
+  'Aisha twijfelt aan haar huurcontract en gaat gratis advies halen bij het _____.': 'Aisha has doubts about her rental contract and gets free advice from the Legal Aid Desk.',
+  'Sven rijdt per ongeluk tegen de auto van zijn buurman en claimt de schade bij zijn _____.': 'Sven accidentally drives into his neighbour\'s car and claims the damage from his third-party insurance.',
+  'Via DigiD vraagt Nour tegelijk huurtoeslag en zorgtoeslag aan bij _____.': 'Via DigiD Nour applies for both rent allowance and healthcare allowance at the Benefits Service at the same time.',
+  'Om verrassingen op de jaarrekening te voorkomen, kiest Sofia voor een _____.': 'To avoid surprises on the annual bill Sofia chooses a fixed energy rate.',
+  'In januari ontvangt Eva de _____ en ziet dat ze €240 terugkrijgt van haar energieleverancier.': 'In January Eva receives the annual bill and sees that her energy supplier will refund her €240.',
+  'Mo zet zijn verwarming op 19 graden en plaatst LED-lampen om _____.': 'Mo turns his heating down to 19 degrees and fits LED bulbs to save energy.',
+  'Op dinsdag zet Layla de grijze container op straat voor de wekelijkse _____.': 'On Tuesday Layla puts the grey bin on the street for the weekly waste collection.',
+  'Als eigenaar van zijn huis betaalt Pieter elk jaar _____ aan de gemeente Amsterdam.': 'As owner of his house Pieter pays property tax to the municipality of Amsterdam every year.',
+  'Fatima volgt een _____ en bereidt zich voor op het KNM-examen over twee jaar.': 'Fatima follows a civic integration course and prepares for the KNM exam in two years.',
+  'Na zijn ontslag vraagt Daan binnen een week zijn WW-uitkering aan bij het _____.': 'After his dismissal Daan applies for unemployment benefit at the UWV within a week.',
+  'Omdat de fabriek sluit, heeft Omar recht op een _____ totdat hij een nieuwe baan vindt.': 'Because the factory is closing Omar is entitled to unemployment benefit until he finds a new job.',
+  'Nadia heeft geen inkomen en geen recht op WW, dus vraagt ze _____ aan bij de gemeente.': 'Nadia has no income and no right to unemployment benefit so she applies for social assistance at the municipality.',
+  'Boris tekent zijn _____ en begint volgende maand als magazijnmedewerker.': 'Boris signs his employment contract and starts as a warehouse worker next month.',
+  'De werkgever betaalt Jan minder dan het _____, wat wettelijk niet is toegestaan.': 'The employer pays Jan less than the minimum wage which is not permitted by law.',
+  'In de _____ voor de zorg staat dat Fatima recht heeft op 26 vakantiedagen per jaar.': 'The collective labour agreement for healthcare states that Fatima is entitled to 26 days of annual leave.',
+  'Elke laatste werkdag van de maand ontvangt Sara haar _____ digitaal per e-mail.': 'On the last working day of every month Sara receives her pay slip digitally by e-mail.',
+  'Als _____ stuurt Carlos elke maand een factuur aan zijn klanten en doet hij zelf zijn belastingaangifte.': 'As a self-employed worker Carlos sends an invoice to his clients every month and files his own tax return.',
+  'Volgend jaar wordt Lars 67 jaar en ontvangt hij zijn eerste _____-uitkering van de SVB.': 'Next year Lars turns 67 and will receive his first state pension payment from the Social Insurance Bank.',
+  'Ahmed stuurt zijn CV en _____ naar tien bedrijven en wordt uitgenodigd voor twee gesprekken.': 'Ahmed sends his CV and cover letter to ten companies and is invited for two interviews.',
+  'Het _____ van Mirjam is €2.800 per maand, maar na belasting ontvangt ze €2.100 netto.': 'Mirjam\'s gross salary is €2,800 per month but after tax she receives €2,100 net.',
+  'Na aftrek van belasting en pensioenpremie ontvangt Eva elke maand €1.950 _____ op haar rekening.': 'After deduction of tax and pension contributions Eva receives €1,950 net salary in her account every month.',
+  'In zijn _____ legt Omar in drie alinea\'s uit waarom hij graag bij dit bedrijf wil werken.': 'In his cover letter Omar explains in three paragraphs why he would like to work for this company.',
+  'Lisa werkt _____ als verpleegkundige en past de andere twee dagen op haar kinderen.': 'Lisa works three days a week as a nurse and looks after her children the other two days.',
+  'De _____ vraagt de directie om uitleg over de geplande reorganisatie die 50 banen kost.': 'The works council asks management to explain the planned reorganisation that will cut 50 jobs.',
+  'Als werknemer heeft Rania _____, maar ook de plicht om op tijd op haar werk te verschijnen.': 'As an employee Rania is entitled to 25 days of leave but also has a duty to arrive at work on time.',
+  'Daan loopt drie maanden _____ bij een advocatenkantoor als verplicht onderdeel van zijn rechtenstudie.': 'Daan does a three-month internship at a law firm as a compulsory part of his law degree.',
+  'Elke zaterdag helpt Emma bij de voedselbank als _____, want ze wil iets terugdoen voor de samenleving.': 'Every Saturday Emma helps at the food bank as voluntary work because she wants to give something back to society.',
+  'In het _____ leert Ibrahim hoe hij zijn cv moet schrijven en hoe hij een sollicitatiegesprek aanpakt.': 'In the civic activation programme Ibrahim learns how to write his CV and how to handle a job interview.',
+  'Omdat haar kind van 7 jaar al drie weken niet naar school gaat, krijgt de moeder een brief van de _____.': 'Because her 7-year-old child has not been to school for three weeks the mother receives a letter from the truancy officer.',
+  'Na de _____ adviseert de leerkracht van groep 8 dat Amara naar de havo kan gaan.': 'After the CITO test the group 8 teacher advises that Amara can go to HAVO.',
+  'Na zijn _____ gaat Daan naar het hbo voor een opleiding tot verpleegkundige.': 'After his HAVO diploma Daan goes to HBO for a nursing qualification.',
+  'Sara volgt een _____ op niveau 4 om verpleegassistente te worden.': 'Sara is doing an MBO course at level 4 to become a nursing assistant.',
+  'Na haar _____ als leraar wil Fatima een masteropleiding doen aan de universiteit.': 'After her HBO teaching diploma Fatima wants to do a master\'s degree at university.',
+  'Omdat beide ouders werken, gaat hun dochter drie dagen per week naar de _____.': 'Because both parents work their daughter goes to childcare three days a week.',
+  'Omar leent €400 per maand bij _____ om zijn studie en zijn huur te kunnen betalen.': 'Omar borrows €400 per month from DUO to pay for his studies and his rent.',
+  'De _____ belt de ouders van Karim omdat hij al tien schooldagen heeft gemist zonder reden.': 'The truancy officer calls Karim\'s parents because he has missed ten school days without a valid reason.',
+  'Fatima volgt een _____ op niveau A2 om beter Nederlands te leren voor het inburgeringsexamen.': 'Fatima takes an NT2 course at level A2 to improve her Dutch for the integration exam.',
+  'Na school gaat Amisha naar de _____ totdat haar moeder haar om vijf uur ophaalt.': 'After school Amisha goes to after-school care until her mother picks her up at five o\'clock.',
+  'Mirjam gaat elke _____ naar school en helpt mee organiseren van de jaarlijkse schoolreis.': 'Mirjam attends every parents\' evening and helps organise the annual school trip.',
+  'Op zijn verjaardag neemt Daan chocoladekoekjes mee naar school om zijn klas te _____.': 'On his birthday Daan brings chocolate biscuits to school to treat his class.',
+  'Na zijn mbo-diploma kiest Boris voor een _____ om zijn kansen op de arbeidsmarkt te verbeteren.': 'After his MBO diploma Boris chooses an HBO follow-on course to improve his chances in the labour market.',
+  'Lisa controleert het _____ op de schoolwebsite voordat ze haar zomervakantie boekt.': 'Lisa checks the holiday schedule on the school website before booking her summer holiday.',
+  'Omdat het kind van 10 jaar de ruit van de buurman heeft ingegooid, zijn de ouders _____ voor de schade.': 'Because the 10-year-old child broke the neighbour\'s window the parents are liable for the damage.',
+  'Na de scheiding hebben beide ouders nog steeds _____ en beslissen ze samen over de school van hun kind.': 'After the divorce both parents still have parental authority and decide together about their child\'s school.',
+  'Met zijn _____ logt Daan in op de website van de Belastingdienst om zijn aangifte te doen.': 'With his DigiD Daan logs in to the Tax Authority website to file his tax return.',
+  'Bij elk ziekenhuisbezoek vraagt de balie om het _____ van de patiënt.': 'At every hospital visit the reception desk asks for the patient\'s BSN.',
+  'Sara gaat naar het _____ om haar paspoort te verlengen en haar adres te wijzigen.': 'Sara goes to the town hall to renew her passport and update her address.',
+  'De rechter oordeelt dat de gemeente de wet heeft overtreden — in een _____ geldt de wet voor iedereen.': 'The court rules that the municipality broke the law — in a constitutional state the law applies to everyone.',
+  'Na de stemming in de _____ is de nieuwe wet aangenomen met 94 stemmen voor en 56 tegen.': 'After the vote in the House of Representatives the new law was passed with 94 votes in favour and 56 against.',
+  'Omdat de nieuwe wet ingaat tegen de vrijheid van godsdienst, is ze strijdig met de _____.': 'Because the new law conflicts with freedom of religion it is contrary to the Constitution.',
+  'Het _____ heeft besloten om €500 miljoen extra te investeren in de bouw van nieuwe woningen.': 'The cabinet has decided to invest €500 million extra in the construction of new homes.',
+  'Na de inbraak belt Lisa de politie via _____ om aangifte te doen.': 'After the burglary Lisa calls the police on 0900-8844 to file a report.',
+  'Het _____ heeft de dijken langs de rivier versterkt na de hevige regenval van de afgelopen winter.': 'The water board has reinforced the dykes along the river after the heavy rainfall of the past winter.',
+  'Sam mag voor het eerst _____ bij de Tweede Kamerverkiezingen nu hij 18 jaar is geworden.': 'Sam can vote for the first time in the House of Representatives elections now that he has turned 18.',
+  'De _____ heeft het wetsvoorstel teruggestuurd naar de Tweede Kamer omdat het niet duidelijk genoeg is.': 'The Senate has sent the bill back to the House of Representatives because it is not clear enough.',
+  'De _____ geeft een persconferentie om de nieuwe belastingmaatregelen van het kabinet toe te lichten.': 'The prime minister holds a press conference to explain the cabinet\'s new tax measures.',
+  'Het _____ vergadert deze week over de nieuwe begroting en de plannen voor het komende jaar.': 'Parliament meets this week to discuss the new budget and the plans for the coming year.',
+  'Op _____ rijdt de koning in de Gouden Koets naar de Ridderzaal om de Troonrede voor te lezen.': 'On Budget Day the king rides in the Golden Coach to the Ridderzaal to read the Speech from the Throne.',
+  'Op _____ draagt de hele familie oranje kleding en gaan ze naar de vrijmarkt in het centrum.': 'On King\'s Day the whole family wears orange clothing and goes to the flea market in the city centre.',
+  'Dankzij de _____ kan een rechter de overheid terugfluiten als die de wet overtreedt.': 'Thanks to the separation of powers a judge can overrule the government if it breaks the law.',
+  'Nadia heeft in het _____ aangegeven dat ze na haar dood al haar organen wil doneren.': 'Nadia has registered in the Donor Register that she wants to donate all her organs after her death.',
+  'Hoewel Omar zijn geloof erg belangrijk vindt, weet hij dat in Nederland de _____ staat.': 'Although Omar considers his faith very important he knows that in the Netherlands the law always takes precedence over religious rules.',
+  'Na drie maanden onderhandelen presenteert de formateur eindelijk een _____ voor de komende vier jaar.': 'After three months of negotiations the formateur finally presents a coalition agreement for the next four years.',
+  'Via _____ ziet Fatima dat ze een brief heeft gekregen van de Belastingdienst over haar aangifte.': 'Via MyGovernment Fatima sees that she has received a letter from the Tax Authority about her tax return.',
+  'Ibrahim heeft een vraag over zijn huurcontract en gaat gratis advies halen bij het _____.': 'Ibrahim has a question about his rental contract and gets free advice from the Legal Aid Desk.',
+  'Na haar scheiding gaat Mirjam naar de _____ om te praten over haar situatie.': 'After her divorce Mirjam visits the social worker to talk about her situation.',
+  'Omar heeft €15.000 schulden en vraagt _____ aan bij de gemeente.': 'Omar has €15,000 of debt and applies for debt assistance at the municipality.',
+  'Elke maand ontvangt Lars €1.400 AOW van de _____ nu hij 67 jaar is geworden.': 'Every month Lars receives €1,400 state pension from the Social Insurance Bank now that he has turned 67.',
+  'Omdat haar moeder niet meer goed kan lopen, vraagt Fatima _____ aan bij de gemeente voor thuiszorg.': 'Because her mother can no longer walk well Fatima applies for Social Support Act home care at the municipality.',
+  'Via de _____ wordt Amara op haar tweede verjaardag ingeënt tegen mazelen en andere ziektes.': 'Through the Municipal Health Service Amara is vaccinated against measles and other diseases on her second birthday.',
+  'Voordat Sara haar webshop opent, schrijft ze haar bedrijf in bij de _____ en krijgt ze een uniek nummer.': 'Before Sara opens her online shop she registers her business at the Chamber of Commerce and receives a unique number.',
+  'Bij de _____ tekenen Daan en Eva de koopakte voor hun nieuwe huis in Utrecht.': 'At the notary Daan and Eva sign the deed of purchase for their new home in Utrecht.',
+  'Via DigiD vraagt Nour vier toeslagen tegelijk aan bij _____ van de Belastingdienst.': 'Via DigiD Nour applies for four allowances at once from the Tax Authority Benefits Service.',
+  'Ahmed gaat naar het _____ om een verbouwingsvergunning aan te vragen voor zijn nieuwe keuken.': 'Ahmed goes to the town hall to apply for a renovation permit for his new kitchen.',
+  'Nu ze 67 jaar is, belt Rania de _____ om te vragen wanneer haar eerste AOW-betaling wordt gestort.': 'Now that she is 67 Rania calls the Social Insurance Bank to ask when her first state pension payment will be made.',
+  'Fatima\'s _____ verloopt volgend jaar en ze vraagt een verlenging aan bij de IND.': 'Fatima\'s residence permit expires next year and she applies for an extension at the IND.',
+  'Na de inbraak doet Boris _____ bij de politie en geeft hij een beschrijving van de dader.': 'After the burglary Boris files a report with the police and gives a description of the perpetrator.',
+  'Vóór 1 mei doet Daan zijn _____ via DigiD en krijgt hij €350 terug van de Belastingdienst.': 'Before 1 May Daan files his tax return via DigiD and receives €350 back from the Tax Authority.',
+  'Het bedrijf vraagt toestemming voordat het de contactgegevens van Nour gebruikt, zoals de _____ vereist.': 'The company asks permission before using Nour\'s contact details as required by the GDPR.',
+  'Pieter koopt een tweedehands auto en schrijft die binnen drie weken in bij de _____.': 'Pieter buys a second-hand car and registers it with the Vehicle Authority within three weeks.',
+  'Na vijf jaar in Nederland gewoond te hebben, vraagt Omar de Nederlandse nationaliteit aan bij de _____.': 'After living in the Netherlands for five years Omar applies for Dutch citizenship at the IND.',
+  'Fatima woont in de _____, vlak bij de stad Haarlem.': 'Fatima lives in the province of North Holland, just outside the city of Haarlem.',
+  'Het parlement vergadert in _____, maar Amsterdam is de officiële hoofdstad van Nederland.': 'Parliament meets in The Hague but Amsterdam is the official capital of the Netherlands.',
+  'Elke ochtend checkt Sara in met haar _____ bij de trein naar Amsterdam Centraal.': 'Every morning Sara checks in with her OV-chip card on the train to Amsterdam Central.',
+  'Op 1 februari 1953 overstroomden grote delen van Zeeland door de _____ en verloren bijna 1.836 mensen het leven.': 'On 1 February 1953 large parts of Zeeland flooded in the flood disaster and nearly 1,836 people lost their lives.',
+  'Dankzij de _____ zijn grote delen van Nederland nu goed beschermd tegen overstromingen.': 'Thanks to the Delta Works large parts of the Netherlands are now well protected against flooding.',
+  'De Flevopolders zijn in de jaren zestig _____ en zijn nu vruchtbaar landbouwgebied.': 'The Flevoland polders were drained in the 1960s and are now fertile agricultural land.',
+  'Met de auto rijdt Lars in minder dan 30 minuten over de _____ van Noord-Holland naar Friesland.': 'By car Lars drives across the Afsluitdijk from North Holland to Friesland in under 30 minutes.',
+  'In de _____ was Amsterdam een van de rijkste en meest invloedrijke steden ter wereld.': 'During the Golden Age Amsterdam was one of the richest and most influential cities in the world.',
+  'De _____ bracht specerijen zoals peper en kaneel vanuit Indonesië naar Europa.': 'The VOC brought spices such as pepper and cinnamon from Indonesia to Europe.',
+  'Nederland erkende in 2023 formeel de misdaden van de _____ en de driehoekshandel.': 'In 2023 the Netherlands formally acknowledged the crimes of slavery and the triangular trade.',
+  '_____ verstopte zich meer dan twee jaar in Amsterdam voordat ze in 1944 werd opgepakt.': 'Anne Frank hid in Amsterdam for more than two years before being arrested in 1944.',
+  'Op 4 mei om 20:00 uur staat heel Nederland _____ voor de slachtoffers van oorlog en geweld.': 'On 4 May at 8 p.m. the whole of the Netherlands observes two minutes of silence for the victims of war and violence.',
+  'Als EU-burger mag Fatima vrij wonen en werken in alle 27 _____ zonder speciale vergunning.': 'As an EU citizen Fatima may freely live and work in all 27 EU countries without a special permit.',
+  'De vader van Ahmed kwam in 1970 als _____ vanuit Marokko naar Nederland om in een fabriek te werken.': 'Ahmed\'s father came to the Netherlands from Morocco in 1970 as a guest worker to work in a factory.',
+  'Het standbeeld van _____ staat op het Binnenhof in Den Haag.': 'The statue of William of Orange stands at the Binnenhof in The Hague.',
+  'Na de _____ in 1975 kwamen veel Surinamers naar Nederland.': 'After the independence of Suriname in 1975 many Surinamese people came to the Netherlands.',
+  'In het Anne Frank Huis in Amsterdam kun je meer leren over de _____ en het leven tijdens de Tweede Wereldoorlog.': 'At the Anne Frank House in Amsterdam you can learn more about the Holocaust and life during the Second World War.',
+  'Omdat het _____ is, zijn de scholen gesloten en is er een gratis festival in het stadspark.': 'Because it is Liberation Day the schools are closed and there is a free festival in the city park.',
+  'Tijdens de vergadering zegt Mirjam _____ wat ze van het plan vindt, ook als het een kritische opmerking is.': 'During the meeting Mirjam says directly what she thinks of the plan, even if it is a critical comment.',
+  'Omdat zijn trein vertraging had, belt Ahmed zijn baas om te laten weten dat hij _____.': 'Because his train was delayed Ahmed calls his boss to let him know he will arrive ten minutes late.',
+  'Hoewel haar ouders een andere mening hebben, beslist Fatima _____.': 'Although her parents have a different opinion Fatima decides for herself who she wants to marry.',
+  'In de multiculturele wijk van Amsterdam wonen mensen van meer dan _____ naast elkaar.': 'In Amsterdam\'s multicultural neighbourhood people of more than 40 nationalities live side by side.',
+  'Een werkgever mag een sollicitant niet afwijzen alleen omdat die een hoofddoek draagt — dat is _____.': 'An employer may not reject an applicant simply because they wear a headscarf — that is discrimination.',
+  'Een journalist schrijft een _____ over de minister, wat in Nederland gewoon is toegestaan.': 'A journalist writes a critical article about the minister, which is perfectly permitted in the Netherlands.',
+  'Boris is _____ en Omar is moslim, maar ze werken dagelijks vriendschappelijk samen op hun werk.': 'Boris is an atheist and Omar is a Muslim but they work together as friends every day at work.',
+  'Nadat ze haar buurvrouw huilend door de muur hoort, belt Rania anoniem naar _____.': 'After hearing her neighbour crying through the wall Rania calls Safe Home anonymously.',
+  'Elk jaar verkoopt de familie hun oude spullen op de _____ tijdens Koningsdag in het stadscentrum.': 'Every year the family sells their old belongings at the flea market during King\'s Day in the city centre.',
+  'Werkgevers, vakbonden en de overheid overleggen in de _____ over nieuwe arbeidsregels.': 'Employers, trade unions and the government consult in the Social and Economic Council about new labour rules.',
+  'In de klas van Amara zitten kinderen met _____, wat de school trots maakt.': 'In Amara\'s class there are children of twelve different nationalities, which makes the school proud.',
+  'Nadat ze een _____ ontvangt, klikt Lisa er niet op om haar gegevens te beschermen.': 'After receiving a suspicious email Lisa does not click on it to protect her personal data.',
+  'Elke zondagochtend helpt Daan als trainer bij de voetbalclub van zijn buurt als _____.': 'Every Sunday morning Daan helps as a coach at his neighbourhood football club as voluntary work.',
+  'Bij de gemeenteraadsverkiezingen gaat Omar naar het _____ om zijn stem uit te brengen op zijn favoriete partij.': 'At the municipal elections Omar goes to the polling station to cast his vote for his favourite party.',
+};
+
+// ─── QUESTION TRANSLATIONS ───────────────────────────────────────────────────
+var questionTranslations = {
+  'Je bent ziek. Wie bel je als eerste?': 'You are sick. Who do you call first?',
+  'Je wilt naar een specialist in het ziekenhuis. Wat heb je nodig?': 'You want to see a hospital specialist. What do you need?',
+  'Je buurvrouw valt en breekt haar heup. Welk nummer bel je?': 'Your neighbour falls and breaks her hip. Which number do you call?',
+  'Je hebt \'s avonds hoge koorts, maar het is geen levensgevaar. Wat doe je?': 'You have a high fever in the evening but it is not life-threatening. What do you do?',
+  'In Nederland moet iedereen een zorgverzekering hebben. Is dit juist?': 'In the Netherlands everyone must have health insurance. Is this correct?',
+  'Wat is het eigen risico in 2025?': 'What is the deductible in 2025?',
+  'Wie vraagt zorgtoeslag aan bij mensen met een laag inkomen?': 'Who applies for healthcare allowance for people with a low income?',
+  'Wat doet een POH — Praktijkondersteuner Huisarts?': 'What does a GP practice nurse (POH) do?',
+  'Welk telefoonnummer bel je bij suïcidale gedachten?': 'Which phone number do you call for suicidal thoughts?',
+  'Kinderen tot welke leeftijd hebben gratis tandartszorg via de basisverzekering?': 'Until what age do children have free dental care through basic insurance?',
+  'Wat doet de GGZ — Geestelijke Gezondheidszorg?': 'What does mental healthcare (GGZ) do?',
+  'De huisarts valt wél onder het eigen risico. Is dit juist?': 'The GP is subject to the deductible. Is this correct?',
+  'Waar haal je medicijnen op met een recept van de dokter?': 'Where do you collect medicine with a prescription from the doctor?',
+  'Een verloskundige begeleidt...': 'A midwife assists...',
+  'Wanneer ga je naar de SEH — Spoedeisende Hulp?': 'When do you go to A&E?',
+  'Wat betekent medisch beroepsgeheim?': 'What does medical confidentiality mean?',
+  'Wanneer vraag je een tolk aan bij de dokter?': 'When do you request an interpreter at the doctor?',
+  'Wat is een polikliniek?': 'What is an outpatient clinic?',
+  'Waarvoor heb je een verwijsbrief nodig?': 'What do you need a referral letter for?',
+  'Wat is een herhaalrecept?': 'What is a repeat prescription?',
+  'Vanaf welke leeftijd mogen kinderen zelf toestemming geven voor medische behandeling?': 'From what age may children give their own consent for medical treatment?',
+  'Je verhuist naar een nieuw adres. Wat moet je doen?': 'You move to a new address. What must you do?',
+  'Binnen hoeveel dagen moet je je inschrijven bij de gemeente na een verhuizing?': 'Within how many days must you register at the municipality after moving?',
+  'Wat is een woningcorporatie?': 'What is a housing association?',
+  'Je verdient weinig en huurt een woning. Welke toeslag kun je aanvragen?': 'You earn little and rent a home. Which allowance can you apply for?',
+  'Je hebt een geschil met je verhuurder over de huurprijs. Waar ga je naartoe?': 'You have a dispute with your landlord about the rent. Where do you go?',
+  'Hoe scheidt je afval in Nederland?': 'How do you separate waste in the Netherlands?',
+  'Wat zijn servicekosten?': 'What are service charges?',
+  'Je koopt een appartement. Je wordt automatisch lid van...': 'You buy an apartment. You automatically become a member of...',
+  'Wat is een hypotheek?': 'What is a mortgage?',
+  'Je buurman maakt elke nacht tot 2 uur harde muziek. Wat kun je doen?': 'Your neighbour makes loud music until 2 a.m. every night. What can you do?',
+  'Via welke website schrijf je je in voor een sociale huurwoning in veel steden?': 'Through which website do you register for social housing in many cities?',
+  'Wat zijn nutsvoorzieningen?': 'What are utilities?',
+  'Wat doet een makelaar?': 'What does an estate agent do?',
+  'Wat is een borg bij het huren van een woning?': 'What is a deposit when renting a home?',
+  'Een WA-verzekering of AVP betaalt voor...': 'Third-party or personal liability insurance pays for...',
+  'Wat is een variabel energietarief?': 'What is a variable energy rate?',
+  'Wat is een jaarrekening van de energieleverancier?': 'What is an annual bill from the energy supplier?',
+  'Op welke dag wordt je afval opgehaald?': 'On which day is your waste collected?',
+  'Welke vier toeslagen regelt Dienst Toeslagen?': 'Which four allowances does the Benefits Service manage?',
+  'Je verliest je baan. Bij welke organisatie vraag je een werkloosheidsuitkering aan?': 'You lose your job. At which organisation do you apply for unemployment benefit?',
+  'Wat moet je doen als je een WW-uitkering ontvangt?': 'What must you do when you receive unemployment benefit?',
+  'Vanaf welke leeftijd heb je recht op het volledige minimumloon in Nederland?': 'From what age are you entitled to the full minimum wage in the Netherlands?',
+  'Je hebt geen inkomen en geen recht op WW. Wat kun je aanvragen?': 'You have no income and no right to unemployment benefit. What can you apply for?',
+  'Wat staat er in een CAO — Collectieve Arbeidsovereenkomst?': 'What is in a CLA (Collective Labour Agreement)?',
+  'Vanaf welke leeftijd ontvang je AOW — Algemene Ouderdomswet?': 'From what age do you receive the state pension (AOW)?',
+  'Op je loonstrook staat je nettoloon. Wat is nettoloon?': 'Your pay slip shows your net salary. What is net salary?',
+  'Een ZZP\'er — Zelfstandige Zonder Personeel — moet zich inschrijven bij...': 'A self-employed person must register at...',
+  'Wat zijn bekende vakbonden in Nederland?': 'What are well-known trade unions in the Netherlands?',
+  'Je solliciteert op een baan. Wat stuur je mee?': 'You apply for a job. What do you send with your application?',
+  'Wat is brutoloon?': 'What is gross salary?',
+  'Wat is nettoloon?': 'What is net salary?',
+  'Wat is deeltijdwerk?': 'What is part-time work?',
+  'Wat doet de OR — Ondernemingsraad?': 'What does the works council (OR) do?',
+  'Welke rechten hebben alle werknemers in Nederland?': 'What rights do all employees in the Netherlands have?',
+  'Kinderopvangtoeslag vraag je aan bij...': 'You apply for childcare allowance at...',
+  'Vanaf welke leeftijd zijn kinderen in Nederland leerplichtig?': 'From what age are children required to attend school in the Netherlands?',
+  'Tot welke leeftijd duurt de leerplicht?': 'Until what age does compulsory education last?',
+  'Julia gaat naar de havo. Na de havo kan ze naar...': 'Julia goes to HAVO. After HAVO she can go to...',
+  'Welk niveau van het mbo is de minimale startkwalificatie?': 'Which MBO level is the minimum entry qualification for the labour market?',
+  'De CITO-toets is een toets aan het einde van...': 'The CITO test is a test at the end of...',
+  'Kinderopvang is voor kinderen van:': 'Childcare is for children aged:',
+  'Bij welke organisatie vraagt een student studiefinanciering aan?': 'At which organisation does a student apply for student finance?',
+  'NT2-cursussen zijn voor...': 'NT2 courses are for...',
+  'Een kind komt regelmatig niet op school. De leerplichtambtenaar...': 'A child regularly does not attend school. The truancy officer...',
+  'Na het VWO — Voorbereidend Wetenschappelijk Onderwijs — kan een student naar...': 'After VWO a student can go to...',
+  'BSO — Buitenschoolse Opvang — is voor kinderen van...': 'After-school care (BSO) is for children aged...',
+  'Wat betekent \'betrokken ouders\' bij een school?': 'What does \'involved parents\' mean at a school?',
+  'Wat is trakteren op school?': 'What is treating classmates at school?',
+  'Wat is een vervolgopleiding?': 'What is a follow-on degree?',
+  'Waarvoor dient het vakantierooster?': 'What is the holiday schedule for?',
+  'Tot welke leeftijd zijn ouders juridisch aansprakelijk als hun kind schade veroorzaakt?': 'Until what age are parents legally liable if their child causes damage?',
+  'Waarvoor gebruik je DigiD — Digitale Identiteit?': 'What do you use DigiD for?',
+  'Wat is het BSN — Burgerservicenummer?': 'What is the BSN (Citizen Service Number)?',
+  'In Nederland is er een rechtsstaat. Wat betekent dit?': 'The Netherlands has a constitutional state. What does this mean?',
+  'Hoeveel leden heeft de Tweede Kamer?': 'How many members does the House of Representatives have?',
+  'Hoe vaak kiezen Nederlanders de Tweede Kamer?': 'How often do the Dutch elect the House of Representatives?',
+  'Vanaf welke leeftijd mag je stemmen in Nederland?': 'From what age may you vote in the Netherlands?',
+  'Wat is de Grondwet?': 'What is the Constitution?',
+  'Waar vergadert de Tweede Kamer?': 'Where does the House of Representatives meet?',
+  'De burgemeester van een gemeente wordt...': 'The mayor of a municipality is...',
+  'Nederland heeft een coalitieregering. Waarom?': 'The Netherlands has a coalition government. Why?',
+  'Wat doet een waterschap?': 'What does a water board do?',
+  'Wat is actief kiesrecht?': 'What is the active right to vote?',
+  'Wat is passief kiesrecht?': 'What is the passive right to vote?',
+  'Wat doet de Eerste Kamer — Senaat?': 'What does the Senate do?',
+  'Het Nederlandse parlement bestaat uit...': 'The Dutch parliament consists of...',
+  'Hoeveel leden heeft de Eerste Kamer — Senaat?': 'How many members does the Senate have?',
+  'Wat doet de koning op Prinsjesdag?': 'What does the king do on Budget Day?',
+  'Wat is machtenscheiding?': 'What is the separation of powers?',
+  'Op welke datum is Koningsdag?': 'On what date is King\'s Day?',
+  'Waar is het Wilhelmus over geschreven?': 'What is the national anthem written about?',
+  'Je hebt een juridische vraag maar weinig geld. Waar ga je heen?': 'You have a legal question but little money. Where do you go?',
+  'Je hebt grote schulden die je niet kunt betalen. Wat kun je aanvragen?': 'You have large debts you cannot pay. What can you apply for?',
+  'De SVB — Sociale Verzekeringsbank — betaalt...': 'The Social Insurance Bank pays...',
+  'De GGD — Gemeentelijke Gezondheidsdienst — organiseert vaccinaties voor kinderen. Waar gaan ouders naartoe?': 'The GGD organises vaccinations for children. Where do parents go?',
+  'Je wilt een bedrijf starten. Waar schrijf je je in?': 'You want to start a business. Where do you register?',
+  'Voor welke documenten heb je altijd een notaris nodig?': 'For which documents do you always need a notary?',
+  'De WMO — Wet Maatschappelijke Ondersteuning — geeft hulp aan...': 'The Social Support Act provides assistance to...',
+  'Maatschappelijk werk is...': 'Social work is...',
+  'Wat regelt de gemeente voor de inwoners?': 'What does the municipality arrange for residents?',
+  'Wie heeft recht op AOW — Algemene Ouderdomswet?': 'Who is entitled to the state pension?',
+  'Wat is een verblijfsvergunning?': 'What is a residence permit?',
+  'Bij welke organisatie vraag je een verblijfsvergunning aan?': 'At which organisation do you apply for a residence permit?',
+  'Wat is een taak van de politie?': 'What is a task of the police?',
+  'Waarom zijn de Deltawerken gebouwd?': 'Why were the Delta Works built?',
+  'Wanneer was de Watersnoodramp?': 'When was the flood disaster?',
+  'Hoeveel mensen stierven bij de Watersnoodramp van 1953?': 'How many people died in the 1953 flood disaster?',
+  'Nederland heeft... provincies.': 'The Netherlands has... provinces.',
+  'Wat is de hoofdstad van Nederland?': 'What is the capital of the Netherlands?',
+  'De OV-chipkaart gebruik je om...': 'You use the OV-chip card to...',
+  'De Afsluitdijk scheidt...': 'The Afsluitdijk separates...',
+  'De VOC — Vereenigde Oostindische Compagnie — was...': 'The VOC was...',
+  'Nederland was betrokken bij de driehoekshandel. Wat werd er verhandeld?': 'The Netherlands was involved in the triangular trade. What was traded?',
+  'Van wanneer tot wanneer was Nederland bezet door nazi-Duitsland?': 'From when to when was the Netherlands occupied by Nazi Germany?',
+  'Wat herdenkt Nederland op 4 mei?': 'What does the Netherlands commemorate on 4 May?',
+  'Wat viert Nederland op 5 mei?': 'What does the Netherlands celebrate on 5 May?',
+  'Wat is het doel van de VN — Verenigde Naties?': 'What is the aim of the United Nations?',
+  'Nederland is een van de oprichters van de NAVO. Wat is de NAVO?': 'The Netherlands is a founding member of NATO. What is NATO?',
+  'Wat is het voordeel van EU — Europese Unie — lidmaatschap voor burgers?': 'What is the benefit of EU membership for citizens?',
+  'Waarom kwamen gastarbeiders naar Nederland in de jaren 60?': 'Why did guest workers come to the Netherlands in the 1960s?',
+  'Willem van Oranje wordt de \'Vader des Vaderlands\' genoemd. Waarom?': 'William of Orange is called the \'Father of the Fatherland\'. Why?',
+  'Wanneer werd Suriname onafhankelijk?': 'When did Suriname become independent?',
+  'In de Gouden Eeuw (17e eeuw) was Nederland...': 'In the Golden Age the Netherlands was...',
+  'Je hebt een afspraak met de dokter om 10:00 uur. Je bent om 10:15 uur. Wat had je beter kunnen doen?': 'You have a doctor\'s appointment at 10:00 and arrive at 10:15. What should you have done?',
+  'Nederlanders zijn bekend om hun directheid. Wat betekent dit?': 'The Dutch are known for their directness. What does this mean?',
+  'Artikel 1 van de Grondwet zegt dat...': 'Article 1 of the Constitution states that...',
+  'Je buurvrouw wordt thuis geslagen. Bij wie meld je dit?': 'Your neighbour is being beaten at home. Who do you report this to?',
+  'Wat is het poldermodel?': 'What is the polder model?',
+  'Godsdienstvrijheid betekent...': 'Freedom of religion means...',
+  'Zelfbeschikking betekent...': 'Self-determination means...',
+  'Zijn gedwongen huwelijken toegestaan in Nederland?': 'Are forced marriages permitted in the Netherlands?',
+  'Vrijwilligerswerk is...': 'Voluntary work is...',
+  'Discriminatie op basis van ras is in Nederland...': 'Discrimination based on race is in the Netherlands...',
+  'Wat is een medisch dossier?': 'What is a medical record?',
+  'Heb je het recht om je eigen medisch dossier in te zien?': 'Do you have the right to view your own medical record?',
+  'Wat is een spreekuur bij de huisarts?': 'What are GP surgery hours?',
+  'Wat zijn gemeentelijke belastingen?': 'What are local taxes?',
+  'Wat is inburgering?': 'What is civic integration?',
+  'Binnen hoeveel jaar moeten nieuwe inwoners het inburgeringsexamen halen?': 'Within how many years must new residents pass the integration exam?',
+  'Wat is een stage?': 'What is an internship?',
+  'Wat is vrijwilligerswerk?': 'What is voluntary work?',
+  'Wat is het MAP — Maatschappelijk Activeringsprogramma?': 'What is the MAP (civic activation programme)?',
+  'Wat is de participatieverklaring?': 'What is the participation declaration?',
+  'Een stagiair werkt in een bedrijf. Krijgt een stagiair normaal gesproken veel betaald?': 'An intern works at a company. Does an intern usually earn much?',
+  'Wat betekent ouderlijk gezag?': 'What does parental authority mean?',
+  'Wat is een voogd?': 'What is a guardian?',
+  'Tot welke leeftijd hebben ouders ouderlijk gezag over hun kind?': 'Until what age do parents have parental authority?',
+  'Wat is orgaandonatie?': 'What is organ donation?',
+  'Hoe sta je geregistreerd in het Donorregister in Nederland?': 'How are you registered in the Donor Register?',
+  'Wat staat boven religieuze regels en culturele tradities in Nederland?': 'What takes precedence over religious rules in the Netherlands?',
+  'Wat doet een formateur na de verkiezingen?': 'What does a formateur do after the elections?',
+  'Waarvoor gebruik je MijnOverheid?': 'What do you use MyGovernment for?',
+  'Wat is een coalitieakkoord?': 'What is a coalition agreement?',
+  'Waarvoor doe je belastingaangifte bij de Belastingdienst?': 'What do you file a tax return for?',
+  'Voor welke datum moet je jaarlijks belastingaangifte doen?': 'Before which date must you file your annual tax return?',
+  'Wat beschermt de AVG — Algemene Verordening Gegevensbescherming?': 'What does the GDPR protect?',
+  'Wat doet de RDW — Rijksdienst voor het Wegverkeer?': 'What does the Vehicle Authority do?',
+  'Wat doet de IND — Immigratie- en Naturalisatiedienst?': 'What does the IND do?',
+  'Wat is naturalisatie?': 'What is naturalisation?',
+  'Via welke website en tool doe je belastingaangifte in Nederland?': 'Via which website and tool do you file a tax return in the Netherlands?',
+  'Wat was de Holocaust?': 'What was the Holocaust?',
+  'Wat is antisemitisme?': 'What is antisemitism?',
+  'Hoeveel Joodse Nederlanders werden vermoord in de Tweede Wereldoorlog?': 'How many Dutch Jews were murdered in the Second World War?',
+  'Op welke datum wordt het traditionele Sinterklaasfeest gevierd?': 'On which date is the Sinterklaas celebration held?',
+  'Welke dag is een officiële nationale feestdag in Nederland?': 'Which day is an official national holiday in the Netherlands?',
+  'Is antisemitisme verboden in Nederland?': 'Is antisemitism forbidden in the Netherlands?',
+  'Wat is diversiteit in de samenleving?': 'What is diversity in society?',
+  'Wat is inclusie in de samenleving?': 'What is inclusion in society?',
+  'Wat is cyberpesten?': 'What is cyberbullying?',
+  'Wat mag je nooit online delen met vreemden?': 'What must you never share online with strangers?',
+  'Vrijwilligerswerk in Nederland is...': 'Voluntary work in the Netherlands is...',
+  'Wat mag een werkgever in Nederland NIET doen bij het aannemen van personeel?': 'What may an employer in the Netherlands NOT do when hiring staff?',
+  'Den Haag wordt \'de regeringsstad\' genoemd. Welke instanties zijn er gevestigd?': 'The Hague is called the government city. Which institutions are located there?',
+  'Sara voelt zich ziek. Ze heeft koorts en keelpijn. Wie belt Sara als eerste?': 'Sara feels sick with a fever and sore throat. Who does she call first?',
+  'Ahmed heeft een recept van de dokter. Hij heeft medicijnen nodig. Waar haalt Ahmed zijn medicijnen op?': 'Ahmed has a prescription from the doctor. Where does he collect his medicine?',
+  'Mirjam is zwanger. Alles gaat goed. Ze is gezond. Wie begeleidt Mirjam tijdens haar zwangerschap?': 'Mirjam is pregnant and healthy. Who guides her during pregnancy?',
+  'Kees heeft \'s avonds hoge koorts. De huisarts is gesloten. Het is geen levensgevaar. Waar gaat Kees naartoe?': 'Kees has a high fever in the evening. The GP is closed. It is not life-threatening. Where does he go?',
+  'Nadia gebruikt al drie maanden dezelfde medicijnen. Ze wil niet elke keer naar de dokter. Wat kan Nadia aanvragen?': 'Nadia has been using the same medicine for 3 months. What can she request?',
+  'Boris valt van zijn fiets. Hij breekt zijn been. Het is ernstig. Welk nummer belt Boris?': 'Boris falls and breaks his leg. Which number does he call?',
+  'Ali heeft depressie. De huisarts verwijst hem door voor psychische hulp. Naar welke organisatie gaat Ali?': 'Ali has depression and is referred for mental health help. Which organisation does he go to?',
+  'Amara gaat naar de huisarts. Ze vraagt of de huisarts onder het eigen risico valt. Wat is het antwoord?': 'Amara asks if the GP is subject to the deductible. What is the answer?',
+  'Carlos is 17 jaar en wil zelf toestemming geven voor een medische behandeling. Vanaf welke leeftijd mag je dat in Nederland?': 'Carlos is 17 and wants to give his own consent for medical treatment. From what age is that allowed?',
+  'Mila spreekt geen Nederlands. Ze begrijpt de dokter niet. Wat kan Mila vragen bij haar doktersbezoek?': 'Mila does not speak Dutch and cannot understand the doctor. What can she request?',
+  'Omar heeft al maanden diabetes. De huisarts heeft weinig tijd voor lange controles. Wie in de huisartsenpraktijk heeft meer tijd voor Omar?': 'Omar has diabetes. The GP has little time. Who in the practice has more time for him?',
+  'Jana wil een specialist zien in het ziekenhuis. Ze heeft geen brief van de huisarts. Wat betaalt de zorgverzekering dan?': 'Jana wants to see a specialist without a GP letter. What does health insurance pay?',
+  'Pita heeft een afspraak op de polikliniek van het ziekenhuis. Wat is een polikliniek?': 'Pita has an appointment at the hospital outpatient clinic. What is an outpatient clinic?',
+  'Rania heeft \'s nachts ernstige pijn op de borst. Ze denkt aan een hartaanval. Waar gaat Rania naartoe?': 'Rania has severe chest pain at night and suspects a heart attack. Where does she go?',
+  'Daan wil zijn eigen medisch dossier bij de huisarts inzien. Mag dat in Nederland?': 'Daan wants to view his own medical record at the GP. Is that allowed?',
+  'Eva verhuist naar een nieuw huis. Binnen hoeveel dagen moet Eva zich inschrijven bij de gemeente in de BRP?': 'Eva moves house. Within how many days must she register at the municipality?',
+  'Mo koopt een appartement. Hij wordt automatisch lid van een organisatie die de gemeenschappelijke ruimtes beheert. Welke organisatie?': 'Mo buys an apartment. He automatically joins an organisation that manages communal areas. Which one?',
+  'Fatima huurt een woning en verdient weinig geld. Ze wil hulp bij het betalen van de huur. Welke toeslag kan Fatima aanvragen?': 'Fatima rents a home and earns little. Which allowance can she apply for?',
+  'Tom heeft een conflict met zijn verhuurder over de huurprijs. Hij vindt de huur te hoog. Waar gaat Tom naartoe?': 'Tom has a rent dispute with his landlord. Where does he go?',
+  'Yuki wil een huis kopen. Ze leent geld van de bank om het huis te betalen. Ze betaalt dit elke maand terug. Hoe heet deze lening?': 'Yuki borrows money from the bank to buy a house and repays it monthly. What is this loan called?',
+  'Layla gooit al haar afval in één zak. Haar gemeente heeft regels voor afvalscheiding. Wat moet Layla doen?': 'Layla puts all waste in one bag. Her municipality has waste separation rules. What must she do?',
+  'Sven betaalt naast zijn huur ook servicekosten aan de verhuurder. Wat zijn servicekosten?': 'Sven pays service charges in addition to rent. What are service charges?',
+  'Rosa wil een sociale huurwoning. Ze heeft weinig geld. Via welke website schrijft Rosa zich in?': 'Rosa wants social housing. Through which website does she register?',
+  'Mei betaalt elke maand een vast bedrag voor energie. Aan het einde van het jaar stuurt haar leverancier een overzicht. Hoe heet dit overzicht?': 'Mei pays a fixed energy amount monthly. At year end her supplier sends an overview. What is it called?',
+  'Karim wil een huis kopen. Hij biedt de verkoper een prijs aan. Hoe heet dit?': 'Karim offers the seller a price for a house. What is this called?',
+  'Sofia huurt een nieuwe woning. De verhuurder vraagt een geldbedrag als garantie voordat ze intrekt. Ze krijgt het terug als ze de woning goed achterlaat. Hoe heet dit?': 'Sofia\'s landlord asks for a sum as guarantee before she moves in. What is this called?',
+  'Lars wil een huis kopen maar weet niet hoe dat werkt. Wie helpt Lars bij het zoeken en kopen van een huis?': 'Lars wants to buy a house but doesn\'t know how. Who helps him?',
+  'Aisha wil energie besparen in haar huis om geld te besparen. Welke actie helpt hierbij?': 'Aisha wants to save energy at home. Which action helps?',
+  'Pieter heeft last van geluidsoverlast van zijn buurman. Zijn verhuurder helpt niet. Waar kan Pieter zijn klacht melden?': 'Pieter suffers noise nuisance and his landlord does not help. Where can he report it?',
+  'Nour wil een sociale huurwoning. Ze hoort dat er een lange wachttijd is. Via welke organisatie kun je een sociale huurwoning huren?': 'Nour wants social housing. Through which organisation can you rent social housing?',
+  'Nour verliest haar baan. Ze wil een uitkering aanvragen. Bij welke organisatie vraagt Nour een WW-uitkering aan?': 'Nour loses her job. At which organisation does she apply for unemployment benefit?',
+  'Emma ontvangt een WW-uitkering. Ze wil thuis wachten op een nieuwe baan. Wat moet Emma eigenlijk doen?': 'Emma receives unemployment benefit and wants to wait at home. What must she actually do?',
+  'Jamal werkt fulltime maar wil minder uren werken om meer tijd voor zijn kinderen te hebben. Hoe heet dat?': 'Jamal works full-time but wants fewer hours for his children. What is this called?',
+  'Lisa is 30 jaar en verdient minder dan het minimumloon. Ze werkt al drie jaar bij hetzelfde bedrijf. Wat heeft Lisa wettelijk recht op?': 'Lisa is 30 and earns below the minimum wage. What is she legally entitled to?',
+  'Tariq bekijkt zijn loonstrook. Hij ziet zijn brutoloon en zijn nettoloon. Wat is het nettoloon?': 'Tariq looks at his pay slip and sees gross and net salary. What is the net salary?',
+  'Julia werkt als kok. In haar sector is een CAO. Wat regelt een CAO?': 'Julia works as a cook in a sector with a CLA. What does a CLA regulate?',
+  'Hassan wil als ZZP\'er voor zichzelf beginnen. Hij heeft geen personeel. Waar moet Hassan zich verplicht inschrijven?': 'Hassan wants to work self-employed. Where must he register?',
+  'Anna heeft geen inkomen en geen recht op WW. Ze heeft te weinig geld om van te leven. Wat kan Anna aanvragen bij de gemeente?': 'Anna has no income and no right to unemployment benefit. What can she apply for?',
+  'Jamal solliciteert op een nieuwe baan als monteur. Wat stuurt hij mee naar de werkgever?': 'Jamal applies for a mechanic job. What does he send to the employer?',
+  'Sofia werkt in een bedrijf met 80 werknemers. Er is een groep werknemers die de belangen van alle collega\'s vertegenwoordigt. Hoe heet deze groep?': 'Sofia\'s company has 80 employees and a group representing all colleagues. What is this group called?',
+  'Lars is 67 jaar en stopt met werken. Hij ontvangt elke maand geld van een overheidsorganisatie. Hoe heet dit?': 'Lars is 67 and stops working. He receives monthly money from a government organisation. What is this called?',
+  'Aisha doet een stage bij een advocatenkantoor als onderdeel van haar opleiding. Ze krijgt geen salaris. Wat is het doel van de stage?': 'Aisha interns at a law firm as part of her course without salary. What is the purpose of the internship?',
+  'Pieter werkt als schoonmaker. Zijn contract eindigt op 31 december. Hoe heet zo\'n contract?': 'Pieter\'s contract ends on 31 December. What type of contract is this?',
+  'Nour helpt elke zaterdag bij een voedselbank. Ze krijgt hier niets voor betaald. Hoe heet dit?': 'Nour helps at a food bank every Saturday without pay. What is this called?',
+  'Emma begint met inburgeren. Ze doet mee aan het MAP — Maatschappelijk Activeringsprogramma. Waar gaat de MAP over?': 'Emma starts integrating and joins the MAP programme. What is the MAP about?',
+  'Jamal heeft een kind van 4 jaar. Het kind gaat naar de basisschool. Is school al verplicht op 4 jaar?': 'Jamal has a 4-year-old child going to primary school. Is school compulsory at age 4?',
+  'Lisa\'s kind zit in groep 8 van de basisschool. Aan het einde doet het kind een toets die helpt bepalen welk voortgezet onderwijs past. Hoe heet deze toets?': 'Lisa\'s child is in group 8. A test helps determine suitable secondary education. What is this test called?',
+  'Tariq\'s dochter gaat naar de havo. Na de havo wil ze hoger onderwijs volgen. Waar kan ze naartoe?': 'Tariq\'s daughter goes to HAVO and wants higher education. Where can she go?',
+  'Julia\'s zoon spijbelt veel van school zonder goede reden. Wie controleert of er een geldige reden is voor het verzuim?': 'Julia\'s son is often absent without reason. Who checks for a valid reason?',
+  'Hassan werkt en heeft een kind van 2 jaar. Hij wil opvang voor zijn kind overdag. Welke opvang is er voor kinderen van 0 tot 4 jaar?': 'Hassan works and has a 2-year-old. What childcare is available for children aged 0 to 4?',
+  'Anna wil studeren maar heeft niet genoeg geld. Bij welke organisatie vraagt ze studiefinanciering aan?': 'Anna wants to study but has no money. At which organisation does she apply for student finance?',
+  'Jamal\'s kind wordt 8 jaar. Volgens de Nederlandse traditie geeft het kind iets lekkers aan zijn hele klas. Hoe heet dit?': 'Jamal\'s child turns 8. By Dutch tradition the child gives treats to the class. What is this called?',
+  'Lisa\'s dochter gaat van de basisschool naar het vmbo. Waar staat vmbo voor?': 'Lisa\'s daughter moves to VMBO. What does VMBO stand for?',
+  'Tariq heeft zijn mbo-diploma op niveau 2. Hij wil meer leren en verder studeren. Hoe heet een opleiding die je doet na een eerder diploma?': 'Tariq has his MBO diploma at level 2 and wants to continue studying. What is a course done after a previous diploma called?',
+  'Julia\'s kind van 11 jaar gooit per ongeluk een ruit bij de buren kapot. Wie is juridisch aansprakelijk voor de schade?': 'Julia\'s 11-year-old accidentally breaks a neighbour\'s window. Who is legally liable?',
+  'Hassan is nieuwkomer in Nederland. Hij wil de Nederlandse taal leren. Welke cursus is speciaal voor mensen die Nederlands niet als moedertaal hebben?': 'Hassan is a newcomer and wants to learn Dutch. Which course is specially for non-native speakers?',
+  'Anna wil weten wanneer de schoolvakanties zijn. Er is een overzicht van alle vrije dagen van het schooljaar. Hoe heet dit?': 'Anna wants to know when school holidays are. What is the overview of all days off called?',
+  'Pieter\'s kind gaat van havo naar hbo. Hoe heet een opleiding op het hbo?': 'Pieter\'s child moves from HAVO to HBO. What is a course at HBO called?',
+  'Pieter wil inloggen bij de Belastingdienst op het internet. Hij heeft een digitale identiteit nodig. Hoe heet dit?': 'Pieter wants to log in to the Tax Authority online. He needs a digital identity. What is it called?',
+  'Nour woont in Nederland. Ze heeft een uniek nummer bij alle overheidsorganisaties. Hoe heet dit nummer?': 'Nour lives in the Netherlands and has a unique number with all government organisations. What is this number?',
+  'Sam mag stemmen bij de Tweede Kamerverkiezingen. Hij kiest zijn vertegenwoordigers. Hoe heet dit kiesrecht?': 'Sam may vote in elections and chooses his representatives. What is this voting right called?',
+  'Emma stelt zichzelf kandidaat bij de gemeenteraadsverkiezingen. Ze wil zelf gekozen worden. Hoe heet dit kiesrecht?': 'Emma stands as a candidate in local elections. What is this voting right called?',
+  'Jamal hoort dat ook de overheid zich aan de wet moet houden in Nederland. Hoe heet dit systeem?': 'Jamal hears that even the government must abide by the law. What is this system called?',
+  'Lisa vraagt zich af welke wet de hoogste is in Nederland en alle andere wetten beschermt. Welke wet is dat?': 'Lisa wonders which is the highest law in the Netherlands. Which law is that?',
+  'Tariq wil stemmen bij de Tweede Kamerverkiezingen. Hoe oud moet hij minimaal zijn om te mogen stemmen?': 'Tariq wants to vote. What is the minimum age to vote?',
+  'De Eerste Kamer controleert wetten die de Tweede Kamer heeft goedgekeurd. Hoeveel leden heeft de Eerste Kamer?': 'The Senate reviews laws approved by the lower house. How many members does the Senate have?',
+  'Julia vraagt welk orgaan in Nederland de wetten maakt en goedkeurt. Welk orgaan is dat?': 'Julia asks which body makes and approves laws. Which body is that?',
+  'Hassan wil na zijn dood zijn organen doneren aan iemand die ze nodig heeft. Waar staat zijn keuze geregistreerd?': 'Hassan wants to donate his organs after death. Where is his choice registered?',
+  'Anna volgt een religie met andere regels dan de Nederlandse wet. Wat geldt er in Nederland als er een conflict is?': 'Anna follows a religion with different rules than Dutch law. What applies in a conflict?',
+  'Pieter wil weten wie de leider is van de Nederlandse regering en het kabinet. Hoe heet deze persoon?': 'Pieter wants to know who leads the Dutch government. What is this person called?',
+  'Nour hoort dat er na de verkiezingen onderhandelingen zijn om een coalitie te vormen. Wie begeleidt deze onderhandelingen?': 'Nour hears of coalition negotiations after elections. Who guides these negotiations?',
+  'Emma wil berichten van overheidsorganisaties online lezen. Ze logt in met haar DigiD. Welk portaal gebruikt ze?': 'Emma wants to read government messages online using DigiD. Which portal does she use?',
+  'Maura rijdt auto. Ze wordt gestopt door de politie. Ze heeft geen rijbewijs. Wie bepaalt de straf van Maura?': 'Maura is stopped by police without a driving licence. Who determines her punishment?',
+  'Daan leest dat het parlement bestaat uit twee kamers. Hoe heten de twee kamers van het Nederlandse parlement?': 'Daan reads parliament has two chambers. What are they called?',
+  'Op 27 april is er een groot feest in heel Nederland. Wat wordt er gevierd?': 'On 27 April there is a big celebration. What is being celebrated?',
+  'Jamal heeft veel schulden en kan ze niet meer betalen. Hij wil hulp. Waar gaat Jamal naartoe bij de gemeente?': 'Jamal has debts he cannot pay. Where does he go at the municipality?',
+  'Lisa heeft een juridische vraag maar heeft te weinig geld voor een advocaat. Waar kan Lisa gratis juridisch advies krijgen?': 'Lisa has a legal question but no money for a lawyer. Where can she get free advice?',
+  'Tariq is 67 jaar en ontvangt elke maand AOW. Welke organisatie betaalt zijn AOW?': 'Tariq is 67 and receives state pension. Which organisation pays it?',
+  'Julia wil een eigen bedrijf starten. Ze moet haar bedrijf officieel registreren. Waar doet ze dat?': 'Julia wants to start a company and must register it officially. Where?',
+  'Hassan koopt een huis. De koop moet officieel worden vastgelegd in een juridisch document. Wie stelt dit document op?': 'Hassan buys a house. The purchase must be recorded in a legal document. Who draws it up?',
+  'Anna is oud en kan het huishouden niet meer zelf doen. Ze wil professionele hulp aan huis. Welke wet regelt deze hulp?': 'Anna is elderly and needs professional home help. Which law regulates this?',
+  'Pieter wil weten welke organisatie alle auto\'s en rijbewijzen in Nederland registreert. Welke organisatie is dat?': 'Pieter wants to know which organisation registers all cars and driving licences. Which one?',
+  'Nour komt van buiten de EU en wil langer dan drie maanden in Nederland blijven. Welk document heeft ze nodig?': 'Nour is from outside the EU and wants to stay more than 3 months. Which document does she need?',
+  'Emma heeft haar belastingaangifte nog niet gedaan. Voor welke datum moet ze dat jaarlijks doen?': 'Emma hasn\'t filed her tax return yet. Before which date must she do this each year?',
+  'Jamal wil de Nederlandse nationaliteit aanvragen. Hoe heet dit en bij welke organisatie doet hij dit?': 'Jamal wants Dutch citizenship. What is this called and at which organisation?',
+  'Lisa heeft persoonlijke en sociale problemen. Ze wil gratis en vertrouwelijke hulp. Welke dienst helpt haar?': 'Lisa has personal and social problems and wants free, confidential help. Which service?',
+  'Tariq heeft een pasgeboren kind. Hij wil kinderbijslag aanvragen. Bij welke organisatie doet hij dat?': 'Tariq has a newborn and wants child benefit. At which organisation?',
+  'Julia\'s persoonsgegevens worden online gebruikt door een bedrijf. Welke Europese wet beschermt haar privacy?': 'Julia\'s personal data is used online by a company. Which European law protects her privacy?',
+  'Julia leert over de Nederlandse geschiedenis. In 1953 overstroomde een groot deel van Nederland. Hoeveel mensen kwamen om bij de Watersnoodramp?': 'Julia learns Dutch history. How many people died in the 1953 flood disaster?',
+  'Hassan leert over de Tweede Wereldoorlog. Nederland was bezet door nazi-Duitsland. Van wanneer tot wanneer duurde de bezetting?': 'Hassan learns about WWII occupation. From when to when did it last?',
+  'Anna vraagt haar leraar hoeveel provincies Nederland heeft. Hoeveel zijn dat er?': 'Anna asks how many provinces the Netherlands has. How many?',
+  'Pieter reist met de trein en vergeet uit te checken met zijn OV-chipkaart. Wat is het gevolg?': 'Pieter forgets to check out with his OV-chip card. What is the consequence?',
+  'Nour leert over de VOC. Wat was de VOC — Vereenigde Oostindische Compagnie?': 'Nour learns about the VOC. What was the VOC?',
+  'Emma leert op school over de Holocaust. Wat was de Holocaust?': 'Emma learns about the Holocaust at school. What was it?',
+  'Jamal weet dat Nederland lid is van de EU — Europese Unie. Wat is een groot voordeel voor burgers?': 'Jamal knows the Netherlands is in the EU. What is a major benefit for citizens?',
+  'Lisa vraagt wanneer de Afsluitdijk is gebouwd. In welke periode is de Afsluitdijk gebouwd?': 'Lisa asks when the Afsluitdijk was built. In which period?',
+  'Tariq leert over Willem van Oranje. Waarom heet hij de \'Vader des Vaderlands\'?': 'Tariq learns about William of Orange. Why is he called \'Father of the Fatherland\'?',
+  'Julia weet dat Sinterklaas een Nederlandse traditie is. Op welke datum wordt het Sinterklaasfeest gevierd?': 'Julia knows Sinterklaas is a Dutch tradition. On which date is it celebrated?',
+  'Hassan heeft een afspraak bij de dokter om 10:00 uur. Om 10:20 uur is hij er nog niet. Wat had hij beter kunnen doen?': 'Hassan has a doctor\'s appointment at 10:00 and isn\'t there by 10:20. What should he have done?',
+  'Anna wil zelf bepalen met wie ze trouwt. Haar familie dwingt haar om met iemand te trouwen die zij niet wil. Wat zegt de Nederlandse wet?': 'Anna\'s family forces her to marry someone she doesn\'t want. What does Dutch law say?',
+  'Pieter ziet dat zijn buurvrouw thuis wordt geslagen door haar partner. Waar kan hij dit anoniem melden?': 'Pieter sees his neighbour being beaten. Where can he report this anonymously?',
+  'Nour ziet dat haar collega wordt gediscrimineerd vanwege zijn religie op het werk. Wat zegt Artikel 1 van de Grondwet?': 'Nour sees her colleague discriminated against for religion. What does Article 1 of the Constitution say?',
+  'Emma is het niet eens met haar baas en zegt dat eerlijk. Heeft Emma het recht om haar mening te zeggen?': 'Emma disagrees with her boss and says so honestly. Does she have the right to do this?',
+  'Jamal helpt elke zaterdag bij een voetbalclub als scheidsrechter. Hij krijgt geen geld. Hoe heet dit?': 'Jamal helps at a football club as referee every Saturday without pay. What is this called?',
+  'Lisa\'s dochter wordt gepest via sociale media en WhatsApp. Hoe heet dit?': 'Lisa\'s daughter is bullied via social media and WhatsApp. What is this called?',
+  'Tariq krijgt een bericht van een onbekende online die vraagt om zijn wachtwoord en BSN. Wat moet Tariq doen?': 'Tariq receives a message asking for his password and BSN. What must he do?',
+  'Julia hoort dat Nederlanders bekend staan om hun directheid. Wat betekent dit in de Nederlandse cultuur?': 'Julia hears the Dutch are known for directness. What does this mean in Dutch culture?',
+  'Anna hoort dat Nederland een tolerant land is. Wat betekent tolerantie?': 'Anna hears the Netherlands is a tolerant country. What does tolerance mean?',
+  'Hassan weet dat de Nederlandse samenleving divers is. Wat betekent diversiteit?': 'Hassan knows Dutch society is diverse. What does diversity mean?',
+  'Pieter overlegt met zijn buren over een probleem in de buurt. Ze zoeken samen een oplossing waar iedereen mee kan leven. Hoe heet dit typisch Nederlandse systeem?': 'Pieter consults his neighbours on a local issue. What is this typically Dutch system called?',
+};
+
+
 
 
 // ─── FILL-IN-THE-BLANK QUESTIONS ─────────────────────────────────────────────
@@ -1387,7 +2859,6 @@ var blankQuestions = [
   {theme:'🏠 Wonen',q:'Omdat Fatima weinig verdient, krijgt zij elke maand _____ van de Belastingdienst.',opts:['Overlast','WA-verzekering','Huurtoeslag'],a:2},
   {theme:'🏠 Wonen',q:'Ahmed schrijft zich binnen vijf dagen in bij de gemeente nadat hij naar zijn nieuwe adres verhuist. [_____]',opts:['Een bod doen','BRP','Huurcommissie'],a:1},
   {theme:'🏠 Wonen',q:'Voordat Mirjam het _____ tekent, leest ze alle regels goed door.',opts:['Een bod doen','Hypotheek','Huurcontract'],a:2},
-  {theme:'🏠 Wonen',q:'Naast de huur van €850 betaalt Boris ook €60 per maand aan _____.',opts:['Overlast','Inburgeringsexamen','Servicekosten'],a:2},
   {theme:'🏠 Wonen',q:'In Amsterdam gooit Nadia haar plastic in de gele container en haar GFT in de groene container. [_____]',opts:['BRP','Afvalinzameling','Afvalscheiding'],a:2},
   {theme:'🏠 Wonen',q:'Tom vindt zijn huurverhoging onterecht en stapt naar de _____ voor een oordeel.',opts:['Afvalscheiding','Jaarrekening','Huurcommissie'],a:2},
   {theme:'🏠 Wonen',q:'Yuki sluit een _____ af van €280.000 om haar eerste huis te kunnen kopen.',opts:['Nutsvoorzieningen','Hypotheek','Afvalscheiding'],a:1},
