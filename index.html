@@ -110,15 +110,15 @@
 .result-badge.pass { background: #EAF3DE; color: #3B6D11; }
 .result-badge.fail { background: #FCEBEB; color: #A32D2D; }
 .restart-btn { font-size: 15px; padding: 10px 22px; border-radius: 20px; border: 0.5px solid var(--color-border-secondary); background: var(--color-background-primary); color: var(--color-text-primary); cursor: pointer; font-weight: 500; margin: 4px 4px; min-height: 42px; }
-.progress-bar-wrap { height: 4px; background: var(--color-border-tertiary); border-radius: 2px; margin-bottom: 1.25rem; }
-.progress-bar-inner { height: 4px; background: #378ADD; border-radius: 2px; transition: width 0.3s; }
+.progress-bar-wrap { height: 4px; background: #e8e8e8; border-radius: 0; margin: 0; }
+.progress-bar-inner { height: 4px; background: #7C3AED; border-radius: 0; transition: width 0.3s; }
 
 /* ── MOBILE RESPONSIVE ───────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .wrap { padding: 0.5rem 10px; padding-top: 0; }
-  .header-box { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #ffffff; padding: 10px 14px; gap: 8px; border-bottom: 1px solid #e8e8e8; margin-bottom: 0; min-height: 56px; }
+  .header-box { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #ffffff; padding: 8px 12px; gap: 6px; border-bottom: 1px solid #e8e8e8; margin-bottom: 0; }
   .header-left h2 { font-size: 15px; font-weight: 700; }
-  .hdr-btn { font-size: 12px; padding: 6px 10px; }
+  .hdr-btn { font-size: 11px; padding: 5px 10px; min-height: 0; border-radius: 16px; }
   .topics-nav { position: sticky; z-index: 99; background: #ffffff; padding: 8px 0 6px; margin-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
   .topic-btn { font-size: 12px; padding: 6px 10px; }
   .word-title { font-size: 15px; }
@@ -126,16 +126,15 @@
   .section-title { font-size: 15px; }
   .q-text { font-size: 14px; }
   .opt-btn { font-size: 14px; padding: 10px 10px; }
-  .restart-btn { padding: 10px 14px; font-size: 14px; margin: 3px 2px; }
+  .restart-btn { font-size: 11px; padding: 5px 10px; min-height: 0; border-radius: 16px; margin: 2px; }
   #searchInput { font-size: 16px; }
   .en-line { font-size: 12px; }
   .speak-btn { font-size: 17px; }
   .exam-wrap { padding: 0 10px; padding-top: 0; }
-  .exam-top { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #ffffff; border-radius: 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 0; padding: 10px 14px; min-height: 56px; }
+  .exam-top { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: #ffffff; border-radius: 0; border-bottom: 1px solid #e8e8e8; margin-bottom: 0; padding: 8px 12px; }
   .exam-top h2 { font-size: 15px; font-weight: 700; margin: 0; }
-  .exam-top p { font-size: 12px; }
-  .exam-timer { font-size: 16px; min-width: 48px; }
-  .restart-btn { font-size: 12px; padding: 6px 10px; }
+  .exam-top p { font-size: 11px; }
+  .exam-timer { font-size: 15px; min-width: 44px; }
 }
 @media (max-width: 380px) {
   .btn-row { gap: 5px; }
@@ -146,7 +145,7 @@
 <div class="wrap" id="mainWrap">
   <div class="header-box">
     <div class="header-left">
-      <h2>KNM Studiegids — Alle 8 Thema's</h2>
+      <h2 onclick="goHome()" style="cursor:pointer;" title="Terug naar woordenlijst">KNM Studiegids — Alle 8 Thema's</h2>
     </div>
     <div class="btn-row">
       <button class="hdr-btn saved-btn" id="savedBtn" onclick="toggleSaved()">🔖 Saved <span id="savedCount"></span></button>
@@ -739,69 +738,84 @@ function updateSavedCount() {
 
 var savedPanelOpen = false;
 
+function goHome() {
+  savedPanelOpen = false;
+  document.getElementById('savedPanel').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+  var nav = document.getElementById('nav');
+  if (nav) nav.style.display = '';
+  document.getElementById('searchResults').style.display = 'none';
+  var si = document.getElementById('searchInput');
+  if (si) si.value = '';
+  searchQuery = '';
+  renderNav();
+  renderContent();
+}
+
 function toggleSaved() {
   savedPanelOpen = !savedPanelOpen;
   var panel = document.getElementById('savedPanel');
   var content = document.getElementById('content');
+  var nav = document.getElementById('nav');
   if (savedPanelOpen) {
     panel.style.display = 'block';
     content.style.display = 'none';
+    if (nav) nav.style.display = 'none';
     document.getElementById('searchResults').style.display = 'none';
-    renderSavedPanel();
+    renderSavedPanel('words');
   } else {
     panel.style.display = 'none';
     content.style.display = 'block';
+    if (nav) nav.style.display = '';
   }
 }
 
-function renderSavedPanel() {
+function renderSavedPanel(activeTab) {
+  activeTab = activeTab || 'words';
   var panel = document.getElementById('savedPanel');
   var wrongQs = [];
   try { wrongQs = JSON.parse(localStorage.getItem('knm_wrong_qs') || '[]'); } catch(e) {}
+  var history = [];
+  try { history = JSON.parse(localStorage.getItem('knm_history') || '[]'); } catch(e) {}
 
-  if (!savedWords.length && !wrongQs.length) {
-    panel.innerHTML = '<div class="saved-empty">🔖 Geen opgeslagen woorden.<br>Klik op het 🔖-icoon op een woordkaart om hem op te slaan.</div>';
-    return;
+  var tabs = [
+    { id:'words',     label:'\uD83D\uDCDA Words',     count: savedWords.length },
+    { id:'questions', label:'\uD4C3 Questions', count: wrongQs.length },
+    { id:'exams',     label:'\uD83D\uDCCA Exams',     count: history.length },
+  ];
+
+  var html = '<div>';
+  html += '<div style="display:flex;gap:0;border-bottom:2px solid #e8e8e8;margin-bottom:16px;">';
+  var tabLabels = {words:'Words', questions:'Questions', exams:'Exams'};
+  var tabCounts = {words:savedWords.length, questions:wrongQs.length, exams:history.length};
+  ['words','questions','exams'].forEach(function(tid) {
+    var isActive = tid === activeTab;
+    var cnt = tabCounts[tid];
+    html += '<button onclick="renderSavedPanel(\'' + tid + '\')" style="background:none;border:none;border-bottom:'+(isActive?'2px solid #7C3AED':'2px solid transparent')+';margin-bottom:-2px;padding:8px 14px;font-size:13px;font-weight:'+(isActive?'700':'500')+';color:'+(isActive?'#7C3AED':'#6b6b6b')+';cursor:pointer;font-family:Nunito,sans-serif;white-space:nowrap;">'+tabLabels[tid]+(cnt?' <span style=\"font-size:11px;background:#f0f0f0;border-radius:10px;padding:1px 6px;\">'+cnt+'</span>':'')+'</button>';
+  });
+  html += '</div>';
+
+  if (activeTab === 'words') {
+    if (!savedWords.length) {
+      html += '<div class="saved-empty">No saved words yet.<br>Tap the bookmark icon on any word card to save it here.</div>';
+    } else {
+      html += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button onclick="savedWords=[];localStorage.setItem(\'knm_saved\',\'[\']\');renderSavedPanel(\'words\');renderContent();updateSavedCount();" style="background:none;border:none;color:#999;cursor:pointer;font-size:12px;font-family:Nunito,sans-serif;text-decoration:underline;">Clear all</button></div>';
+    }
   }
 
-  var html = '<div class="saved-panel-header"><h3>🔖 Opgeslagen</h3>';
-  html += '<button class="clear-saved-btn" onclick="clearAllSaved()">Alles verwijderen</button></div>';
+  panel.innerHTML = html + '<div id="savedTabContent"></div></div>';
+  renderSavedTabContent(activeTab, wrongQs, history);
+}
 
-  // ── WRONG QUESTIONS ────────────────────────────────────────────────────────
-  if (wrongQs.length) {
-    html += '<div style="margin-bottom:24px;">';
-    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">';
-    html += '<span style="font-size:13px;font-weight:700;color:#7a5c00;background:#fff8e6;padding:3px 10px;border-radius:20px;">📌 Fout beantwoord ('+wrongQs.length+')</span>';
-    html += '<button onclick="clearWrongQs();renderSavedPanel();updateSavedCount();" style="background:none;border:none;color:#999;cursor:pointer;font-size:12px;font-family:Nunito,sans-serif;text-decoration:underline;">Wis lijst</button>';
-    html += '</div>';
+function renderSavedTabContent(activeTab, wrongQs, history) {
+  var el = document.getElementById('savedTabContent');
+  if (!el) return;
+  var html = '';
 
-    // Group by theme
-    var byTheme = {};
-    wrongQs.forEach(function(q) {
-      if (!byTheme[q.theme]) byTheme[q.theme] = [];
-      byTheme[q.theme].push(q);
-    });
-
-    Object.keys(byTheme).forEach(function(theme) {
-      html += '<div style="margin-bottom:12px;">';
-      html += '<p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b6b6b;margin:0 0 6px;">'+theme+'</p>';
-      byTheme[theme].forEach(function(q) {
-        html += '<div class="word-card" style="margin-bottom:6px;border-left:3px solid #F5C842;">';
-        html += '<p style="font-size:13px;font-weight:600;color:#1a1a1a;margin:0 0 8px;">'+q.q+'</p>';
-        q.opts.forEach(function(opt, oi) {
-          var isCorrect = oi === q.a;
-          html += '<div style="font-size:12px;padding:4px 8px;border-radius:6px;margin-bottom:3px;'+(isCorrect?'background:#EAF3DE;color:#3B6D11;font-weight:600;':'color:#6b6b6b;')+'">'+String.fromCharCode(65+oi)+'. '+opt+'</div>';
-        });
-        html += '</div>';
-      });
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-
-  // ── SAVED WORD CARDS ───────────────────────────────────────────────────────
-  if (savedWords.length) {
-    html += '<div style="margin-bottom:8px;font-size:13px;font-weight:700;color:#1a1a1a;">📚 Opgeslagen woorden ('+savedWords.length+')</div>';
+  if (activeTab === 'words') {
+    if (!savedWords.length) {
+      el.innerHTML = html; return;
+    }
     var grouped = {};
     savedWords.forEach(function(s) {
       if (!grouped[s.topicId]) grouped[s.topicId] = [];
@@ -816,40 +830,84 @@ function renderSavedPanel() {
         var entry = t.words[wi];
         if (!entry) return;
         var dutchTitle = entry.w.replace(/\s*\([^)]*\)\s*$/, '').trim();
-        var safeDutchTitle = dutchTitle.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        var safeDutchTitle = dutchTitle.replace(/\\/g,'\\\\').replace(/\'/g,"\\'");
         html += '<div class="word-card" style="margin-bottom:8px;">';
         html += '<div class="word-title-row">';
-        html += '<button class="save-word-btn saved" onclick="toggleSaveWord(\''+t.id+'\','+wi+',this)" title="Verwijder uit opgeslagen">🔖</button>';
+        html += '<button class="save-word-btn saved" onclick="toggleSaveWord(\''+t.id+'\','+wi+',this)">\uD83D\uDD16</button>';
         html += '<p class="word-title">'+entry.w+'</p>';
-        html += '<button class="speak-btn speak-title" onclick="speakDutch(\''+safeDutchTitle+'\',this)">🔊</button>';
+        html += '<button class="speak-btn speak-title" onclick="speakDutch(\''+safeDutchTitle+'\',this)">\uD83D\uDD0A</button>';
         html += '</div><ul class="word-body">';
         entry.nl.forEach(function(line, lineIdx) {
           var key = t.id + '-' + wi + '-' + lineIdx;
           sentenceMap[key] = { nl: line, en: entry.en };
           var st = sentenceTranslations[key];
-          var safeLine = line.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+          var safeLine = line.replace(/\\/g,'\\\\').replace(/\'/g,"\\'");
           html += '<li><div class="sentence-row"><span class="nl-text">'+line+'</span>';
-          html += '<button class="speak-btn" onclick="speakDutch(\''+safeLine+'\',this)">🔊</button>';
-          html += '<button class="translate-btn'+(st&&st.visible?' active':'')+'" id="tbtn-'+key+'" onclick="toggleTranslation(\''+key+'\',this)">🇬🇧</button>';
-          html += '</div><div class="en-line" id="en-'+key+'" style="'+(st&&st.visible?'':'display:none')+'">'+(st?'🇬🇧 '+st.text:'')+'</div></li>';
+          html += '<button class="speak-btn" onclick="speakDutch(\''+safeLine+'\',this)">\uD83D\uDD0A</button>';
+          html += '<button class="translate-btn'+(st&&st.visible?' active':'')+'" id="tbtn-'+key+'" onclick="toggleTranslation(\''+key+'\',this)">\uD83C\uDDEC\uD83C\uDDE7</button>';
+          html += '</div><div class="en-line" id="en-'+key+'" style="'+(st&&st.visible?'':'display:none')+'">'+(st?'\uD83C\uDDEC\uD83C\uDDE7 '+st.text:'')+'</div></li>';
         });
         html += '</ul></div>';
       });
       html += '</div>';
     });
+
+  } else if (activeTab === 'questions') {
+    if (!wrongQs.length) {
+      html = '<div class="saved-empty">No wrong questions yet.<br>Questions you get wrong in the exam appear here.</div>';
+    } else {
+      html += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button onclick="clearWrongQs();renderSavedPanel(\'questions\');updateSavedCount();" style="background:none;border:none;color:#999;cursor:pointer;font-size:12px;font-family:Nunito,sans-serif;text-decoration:underline;">Clear all</button></div>';
+      var byTheme = {};
+      wrongQs.forEach(function(q) { if (!byTheme[q.theme]) byTheme[q.theme] = []; byTheme[q.theme].push(q); });
+      Object.keys(byTheme).forEach(function(theme) {
+        html += '<p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b6b6b;margin:0 0 8px;">'+theme+'</p>';
+        byTheme[theme].forEach(function(q) {
+          html += '<div class="word-card" style="margin-bottom:8px;border-left:3px solid #F5C842;">';
+          html += '<p style="font-size:13px;font-weight:600;color:#1a1a1a;margin:0 0 8px;">'+q.q+'</p>';
+          q.opts.forEach(function(opt, oi) {
+            var isCorrect = oi === q.a;
+            html += '<div style="font-size:12px;padding:4px 8px;border-radius:6px;margin-bottom:3px;'+(isCorrect?'background:#EAF3DE;color:#3B6D11;font-weight:600;':'color:#6b6b6b;')+'">'+String.fromCharCode(65+oi)+'. '+opt+'</div>';
+          });
+          html += '</div>';
+        });
+      });
+    }
+
+  } else if (activeTab === 'exams') {
+    if (!history.length) {
+      html = '<div class="saved-empty">No exam history yet.<br>Complete a Practice Exam to see your scores here.</div>';
+    } else {
+      html += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button onclick="localStorage.removeItem(\'knm_history\');renderSavedPanel(\'exams\');updateSavedCount();" style="background:none;border:none;color:#999;cursor:pointer;font-size:12px;font-family:Nunito,sans-serif;text-decoration:underline;">Clear history</button></div>';
+      html += '<div style="border-radius:10px;overflow:hidden;border:1px solid #e8e8e8;">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+      html += '<thead><tr style="background:#f9f9fb;"><th style="padding:8px 12px;text-align:left;color:#6b6b6b;font-weight:600;">Datum</th><th style="padding:8px 12px;text-align:center;color:#6b6b6b;font-weight:600;">Score</th><th style="padding:8px 12px;text-align:center;color:#6b6b6b;font-weight:600;">%</th><th style="padding:8px 12px;text-align:center;color:#6b6b6b;font-weight:600;">Result</th></tr></thead><tbody>';
+      history.forEach(function(h, idx) {
+        var pct = Math.round(h.score / h.total * 100);
+        var rowBg = idx % 2 === 0 ? '' : 'background:#fafafa;';
+        html += '<tr style="'+rowBg+'border-top:1px solid #f0f0f0;">';
+        html += '<td style="padding:8px 12px;color:#1a1a1a;font-size:12px;">'+h.date+'<br><span style="color:#6b6b6b;font-size:11px;">'+(h.time||'')+'</span></td>';
+        html += '<td style="padding:8px 12px;text-align:center;font-weight:600;color:#1a1a1a;">'+h.score+'/'+h.total+'</td>';
+        html += '<td style="padding:8px 12px;text-align:center;color:#6b6b6b;">'+pct+'%</td>';
+        html += '<td style="padding:8px 12px;text-align:center;"><span style="font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;'+(h.pass?'background:#EAF3DE;color:#3B6D11;':'background:#FCEBEB;color:#A32D2D;')+'">'+(h.pass?'\u2713':'\u2717')+'</span></td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
   }
 
-  panel.innerHTML = html;
+  el.innerHTML = html;
 }
 
 function clearAllSaved() {
   savedWords = [];
   localStorage.setItem('knm_saved', JSON.stringify(savedWords));
   localStorage.removeItem('knm_wrong_qs');
+  localStorage.removeItem('knm_history');
   updateSavedCount();
-  renderSavedPanel();
+  renderSavedPanel('words');
   renderContent();
 }
+
 
 var sentenceTranslations = {}; // key -> { text, visible }
 var pendingTranslations = {};  // key -> true (loading in progress)
@@ -1002,6 +1060,28 @@ function clearWrongQs() {
 }
 
 function startExam() {
+  // Check for saved progress from an incomplete exam (within 2 hours)
+  try {
+    var saved = JSON.parse(localStorage.getItem('knm_exam_progress') || 'null');
+    if (saved && saved.questions && saved.questions.length && (Date.now() - saved.ts) < 7200000) {
+      var answeredCount = saved.answers.filter(function(a) { return a !== -1; }).length;
+      if (answeredCount > 0 && confirm('Je hebt een onvoltooid examen (' + answeredCount + '/' + saved.questions.length + ' vragen beantwoord). Wil je verdergaan?')) {
+        examQuestions = saved.questions;
+        examAnswers = saved.answers;
+        examSecondsLeft = saved.secondsLeft || 45 * 60;
+        examSubmitted = false;
+        document.getElementById('mainWrap').style.display = 'none';
+        document.getElementById('examWrap').style.display = 'block';
+        renderExam();
+        startTimer();
+        setTimeout(applyHeaderOffset, 50);
+        window.scrollTo(0, 0);
+        return;
+      }
+    }
+  } catch(e) {}
+
+  clearExamProgress();
   var totalSlots = 40;
   var maxBlanks = Math.floor(totalSlots * 0.09); // <10% → max 3 blank questions
 
@@ -1082,6 +1162,7 @@ function startTimer() {
   examTimerInterval = setInterval(function() {
     examSecondsLeft--;
     updateTimerDisplay();
+    if (examSecondsLeft % 30 === 0) saveExamProgress(); // autosave every 30s
     if (examSecondsLeft <= 0) {
       clearInterval(examTimerInterval);
       if (!examSubmitted) submitExam();
@@ -1105,9 +1186,25 @@ function updateTimerDisplay() {
 
 function backToGuide() {
   stopTimer();
+  clearExamProgress();
   document.getElementById('examWrap').style.display = 'none';
   document.getElementById('mainWrap').style.display = 'block';
   window.scrollTo(0, 0);
+}
+
+function saveExamProgress() {
+  try {
+    localStorage.setItem('knm_exam_progress', JSON.stringify({
+      questions: examQuestions,
+      answers: examAnswers,
+      secondsLeft: examSecondsLeft,
+      ts: Date.now()
+    }));
+  } catch(e) {}
+}
+
+function clearExamProgress() {
+  localStorage.removeItem('knm_exam_progress');
 }
 
 function selectAnswer(qIdx, optIdx) {
@@ -1119,16 +1216,23 @@ function selectAnswer(qIdx, optIdx) {
   var correctIdx = examQuestions[qIdx].a;
   var isCorrect = optIdx === correctIdx;
 
-  // If answered correctly, remove from wrong queue and update saved count
-  if (isCorrect) {
-    try {
-      var wrongQs = JSON.parse(localStorage.getItem('knm_wrong_qs') || '[]');
-      var qText = examQuestions[qIdx].q;
+  // Save answer to localStorage immediately
+  saveExamProgress();
+
+  // Update wrong question queue immediately (add if wrong, remove if correct)
+  try {
+    var wrongQs = JSON.parse(localStorage.getItem('knm_wrong_qs') || '[]');
+    var qText = examQuestions[qIdx].q;
+    if (isCorrect) {
       wrongQs = wrongQs.filter(function(q) { return q.q !== qText; });
-      localStorage.setItem('knm_wrong_qs', JSON.stringify(wrongQs));
-      updateSavedCount();
-    } catch(e) {}
-  }
+    } else {
+      if (!wrongQs.some(function(q) { return q.q === qText; })) {
+        wrongQs.push(examQuestions[qIdx]);
+      }
+    }
+    localStorage.setItem('knm_wrong_qs', JSON.stringify(wrongQs));
+    updateSavedCount();
+  } catch(e) {}
 
   // Show immediate feedback on all options for this question
   document.querySelectorAll('.opt-btn[data-q="' + qIdx + '"]').forEach(function(btn) {
@@ -1200,6 +1304,7 @@ function selectAnswer(qIdx, optIdx) {
 function submitExam() {
   examSubmitted = true;
   stopTimer();
+  clearExamProgress();
   var score = 0;
   var wrongQs = [];
   examQuestions.forEach(function(q, i) {
@@ -1301,8 +1406,9 @@ function renderExam() {
   html += '<div class="exam-timer" id="examTimer">45:00</div>';
   html += '<button class="restart-btn" onclick="backToGuide()">← Terug</button>';
   html += '</div>';
-  html += '</div></div>';
-  html += '<div class="progress-bar-wrap"><div class="progress-bar-inner" id="progressBar" style="width:0%"></div></div>';
+  html += '</div>';
+  html += '<div class="progress-bar-wrap" style="margin:8px 0 0;border-radius:0;"><div class="progress-bar-inner" id="progressBar" style="width:0%"></div></div>';
+  html += '</div>';
 
   var lastTheme = null;
   examQuestions.forEach(function(q, i) {
@@ -1587,7 +1693,9 @@ function setTopic(i) {
   savedPanelOpen = false;
   document.getElementById('savedPanel').style.display = 'none';
   document.getElementById('content').style.display = 'block';
-  document.getElementById('content').innerHTML = ''; // clear shell so verb tab rebuilds
+  document.getElementById('content').innerHTML = '';
+  var nav = document.getElementById('nav');
+  if (nav) nav.style.display = ''; // clear shell so verb tab rebuilds
   var si = document.getElementById('searchInput');
   if (si) si.value = '';
   searchQuery = '';
