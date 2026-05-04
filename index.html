@@ -744,6 +744,8 @@ function goHome() {
   document.getElementById('content').style.display = 'block';
   var nav = document.getElementById('nav');
   if (nav) nav.style.display = '';
+  var searchWrap = document.querySelector('.search-wrap');
+  if (searchWrap) searchWrap.style.display = '';
   document.getElementById('searchResults').style.display = 'none';
   var si = document.getElementById('searchInput');
   if (si) si.value = '';
@@ -757,16 +759,19 @@ function toggleSaved() {
   var panel = document.getElementById('savedPanel');
   var content = document.getElementById('content');
   var nav = document.getElementById('nav');
+  var searchWrap = document.querySelector('.search-wrap');
   if (savedPanelOpen) {
     panel.style.display = 'block';
     content.style.display = 'none';
     if (nav) nav.style.display = 'none';
+    if (searchWrap) searchWrap.style.display = 'none';
     document.getElementById('searchResults').style.display = 'none';
     renderSavedPanel('words');
   } else {
     panel.style.display = 'none';
     content.style.display = 'block';
     if (nav) nav.style.display = '';
+    if (searchWrap) searchWrap.style.display = '';
   }
 }
 
